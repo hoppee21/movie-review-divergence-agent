@@ -1,0 +1,66 @@
+cross-cultural-review-agent/
+├── artifacts/
+│   ├── manifest.json
+│   ├── movies.json
+│   ├── movies.csv
+│   ├── movies.parquet
+│   ├── themes.csv
+│   ├── themes.jsonl
+│   ├── themes.parquet
+│   └── movie_details/
+│       ├── tt0036628_1305158.json
+│       └── ...
+│
+├── outputs/
+│   ├── reports/
+│   ├── traces/
+│   └── sessions/
+│
+├── app/
+│   ├── schemas/
+│   │   ├── artifact_index.py
+│   │   ├── artifact_dossier.py
+│   │   ├── runtime_context.py
+│   │   └── trace.py
+│   │
+│   ├── repositories/
+│   │   ├── manifest_repository.py
+│   │   ├── movie_index_repository.py
+│   │   ├── dossier_repository.py
+│   │   ├── report_repository.py
+│   │   └── session_repository.py
+│   │
+│   ├── memory/
+│   │   ├── session_state.py
+│   │   ├── context_store.py
+│   │   └── report_cache.py
+│   │
+│   ├── agent/
+│   │   ├── orchestrator.py
+│   │   ├── intent_router.py
+│   │   ├── movie_resolver.py
+│   │   ├── dossier_adapter.py
+│   │   ├── evidence_selector.py
+│   │   ├── context_builder.py
+│   │   ├── followup_handler.py
+│   │   └── grounding_checker.py
+│   │
+│   ├── llm/
+│   │   ├── client.py
+│   │   ├── prompts.py
+│   │   ├── renderer.py
+│   │   └── output_parser.py
+│   │
+│   ├── tui/
+│   │   └── main.py
+│   │
+│   └── utils/
+│       ├── paths.py
+│       ├── ids.py
+│       └── logging.py
+│
+└── tests/
+    ├── test_artifact_dossier.py
+    ├── test_dossier_adapter.py
+    ├── test_context_builder.py
+    └── test_agent_flow.py

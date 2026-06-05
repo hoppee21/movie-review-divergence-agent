@@ -1,0 +1,3 @@
+openai:
+  api_key: "replace-with-your-openai-api-key"
+  model: "gpt-5.4"

@@ -1,0 +1,43 @@
+{
+  "artifact_type": "chroma_divergence_evidence_index",
+  "schema_version": "v1",
+  "generated_at": "2026-06-01T18:44:50.133029+00:00",
+  "collection_name": "divergence_evidence",
+  "persist_directory": "chroma_divergence_evidence",
+  "embedding_model": "Qwen/Qwen3-Embedding-8B",
+  "embedding_source": "precomputed_notebook_qwen_embeddings",
+  "normalize_embeddings": true,
+  "distance_space": "cosine",
+  "selection_parameters": {
+    "min_text_chars": 30,
+    "min_topic_similarity": 0.45,
+    "min_rating_gap": 4.0,
+    "top_pairs_per_movie": 10,
+    "divergence_rating_weight": 0.65,
+    "divergence_topic_weight": 0.35
+  },
+  "counts": {
+    "source_reviews": 95920,
+    "source_movies_with_both_platforms": 605,
+    "movies_with_evidence": 599,
+    "divergent_pairs": 5087,
+    "evidence_documents": 10174
+  },
+  "files": {
+    "manifest": "chroma_divergence_evidence_manifest.json",
+    "evidence_jsonl": "divergence_evidence.jsonl",
+    "pairs_csv": "divergence_pairs.csv",
+    "chroma_zip": "chroma_divergence_evidence.zip"
+  },
+  "langchain_load_contract": {
+    "vectorstore_package": "langchain_chroma",
+    "embedding_package": "langchain_huggingface",
+    "vectorstore_class": "Chroma",
+    "embedding_class": "HuggingFaceEmbeddings",
+    "required_arguments": [
+      "collection_name",
+      "persist_directory",
+      "embedding_function"
+    ]
+  }
+}

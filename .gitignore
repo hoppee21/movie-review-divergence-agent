@@ -1,0 +1,30 @@
+# Secrets and local credentials
+config/openai.yml
+.env
+.env.*
+!.env.example
+
+# Python cache and test output
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# macOS / IDE
+.DS_Store
+.idea/
+
+# Frontend dependencies and build output
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Local evidence/data artifacts
+reviews.jsonl
+web_artifacts.zip
+chroma_divergence_evidence/
+divergence_evidence_artifacts/chroma/
+divergence_evidence_artifacts/*.jsonl
+divergence_evidence_artifacts/*.csv
