@@ -11,6 +11,20 @@ __pycache__/
 .coverage
 .coverage.*
 htmlcov/
+tests/
+test/
+**/tests/
+**/test/
+__tests__/
+**/__tests__/
+test_*.py
+*_test.py
+*.test.*
+*.spec.*
+pytest.ini
+tox.ini
+.coveragerc
+coverage.xml
 
 # macOS / IDE
 .DS_Store
@@ -22,6 +36,9 @@ frontend/dist/
 frontend/.vite/
 
 # Local evidence/data artifacts
+selected_movies.csv
+*.ipynb
+.ipynb_checkpoints/
 reviews.jsonl
 web_artifacts.zip
 chroma_divergence_evidence/

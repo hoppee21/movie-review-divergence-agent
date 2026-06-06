@@ -8,8 +8,6 @@ The notebook builds a local Chroma evidence index. The runtime app loads that lo
 
 - Agent/API source under `app/`
 - Frontend source under `frontend/src/`
-- Tests under `tests/`
-- Small metadata files such as `selected_movies.csv`
 - Config template `config/openai.example.yml`
 
 ## What Is Not Committed
@@ -17,6 +15,9 @@ The notebook builds a local Chroma evidence index. The runtime app loads that lo
 The following files are intentionally local-only and ignored:
 
 - `config/openai.yml`
+- private tests under `tests/`
+- the local movie database `selected_movies.csv`
+- notebooks and notebook checkpoints
 - raw review data such as `reviews.jsonl`
 - Chroma databases and evidence JSONL/CSV outputs
 - zip artifacts
@@ -61,11 +62,7 @@ npm run dev -- --host 127.0.0.1
 
 Open `http://127.0.0.1:5173/`.
 
-## Tests
-
-```bash
-/opt/anaconda3/envs/Agent/bin/python -m pytest -q
-```
+## Frontend Build
 
 ```bash
 cd frontend
