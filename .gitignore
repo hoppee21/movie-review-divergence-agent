@@ -17,14 +17,29 @@ test/
 **/test/
 __tests__/
 **/__tests__/
+spec/
+specs/
+**/spec/
+**/specs/
+e2e/
+**/e2e/
+cypress/
+**/cypress/
+playwright/
+**/playwright/
 test_*.py
 *_test.py
+*_spec.py
 *.test.*
 *.spec.*
 pytest.ini
 tox.ini
 .coveragerc
 coverage.xml
+jest.config.*
+vitest.config.*
+playwright.config.*
+cypress.config.*
 
 # macOS / IDE
 .DS_Store
