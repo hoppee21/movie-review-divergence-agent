@@ -621,15 +621,18 @@ const AnalysisReport = ({ analysis }: { analysis: AnalysisResp }) => {
 };
 
 const MovieDetailModal = ({ movie, onClose }: { movie: Movie | null; onClose: () => void }) => {
-  const [analysis, setAnalysis] = useState<AnalysisResp | null>(null);
   const [analysisLanguage, setAnalysisLanguage] = useState<AnalysisLanguage>("zh");
+  const [analysesByLanguage, setAnalysesByLanguage] = useState<
+    Partial<Record<AnalysisLanguage, AnalysisResp>>
+  >({});
   const [loadingAnalysis, setLoadingAnalysis] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const analysisControllerRef = useRef<AbortController | null>(null);
+  const analysis = analysesByLanguage[analysisLanguage] ?? null;
 
   useEffect(() => {
     if (!movie) return;
-    setAnalysis(null);
+    setAnalysesByLanguage({});
     setAnalysisError(null);
     analysisControllerRef.current?.abort();
 
@@ -660,7 +663,8 @@ const MovieDetailModal = ({ movie, onClose }: { movie: Movie | null; onClose: ()
         const text = await response.text();
         throw new Error(text || "Analysis failed");
       }
-      setAnalysis((await response.json()) as AnalysisResp);
+      const result = (await response.json()) as AnalysisResp;
+      setAnalysesByLanguage((previous) => ({ ...previous, [language]: result }));
     } catch (err: any) {
       if (err?.name !== "AbortError") {
         setAnalysisError(err?.message ?? "Analysis failed");
@@ -674,14 +678,9 @@ const MovieDetailModal = ({ movie, onClose }: { movie: Movie | null; onClose: ()
 
   function changeAnalysisLanguage(language: AnalysisLanguage) {
     if (language === analysisLanguage) return;
-    const shouldRegenerate = Boolean(analysis && canAnalyze && !loadingAnalysis);
     setAnalysisLanguage(language);
-    setAnalysis(null);
     setAnalysisError(null);
     analysisControllerRef.current?.abort();
-    if (shouldRegenerate) {
-      void generateAnalysis(language);
-    }
   }
 
   return (

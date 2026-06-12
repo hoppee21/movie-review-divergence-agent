@@ -277,22 +277,23 @@ class MovieEvidencePromptCore:
             pair_id = item.pair_id or "unknown_pair"
             pair_label = pair_labels.setdefault(pair_id, f"P{len(pair_labels) + 1}")
             evidence_label = f"E{index}"
+            meta = item.metadata
             if pair_id != current_pair:
                 current_pair = pair_id
-                lines.extend(["", f"Pair {pair_label} (source_pair_id: {pair_id}):"])
-            meta = item.metadata
+                lines.extend(
+                    [
+                        "",
+                        f"Pair {pair_label}:",
+                        f"  topic_similarity: {meta.get('topic_similarity', '')}",
+                        f"  rating_gap: {meta.get('rating_gap', '')}",
+                        f"  divergence_score: {meta.get('divergence_score', '')}",
+                    ]
+                )
             lines.extend(
                 [
-                    f"- evidence_label: {evidence_label}",
-                    f"  internal_ref: {pair_label}/{evidence_label}",
-                    f"  source_evidence_id: {item.evidence_id}",
+                    f"- internal_ref: {pair_label}/{evidence_label}",
                     f"  platform: {meta.get('platform', '')}",
                     f"  rating: {meta.get('rating', '')}",
-                    f"  counterpart_platform: {meta.get('counterpart_platform', '')}",
-                    f"  counterpart_rating: {meta.get('counterpart_rating', '')}",
-                    f"  topic_similarity: {meta.get('topic_similarity', '')}",
-                    f"  rating_gap: {meta.get('rating_gap', '')}",
-                    f"  divergence_score: {meta.get('divergence_score', '')}",
                     "  full_review:",
                     _indent(item.text, "    "),
                 ]
