@@ -116,7 +116,11 @@ class MovieChatSession:
         raw_assistant_message: ChatMessage,
         user_message: ChatMessage | None = None,
     ) -> MovieChatReply:
-        segments = split_internal_refs(raw_assistant_message.content)
+        allowed_refs = {ref.citation for ref in self.evidence_refs}
+        segments = split_internal_refs(
+            raw_assistant_message.content,
+            allowed_refs=allowed_refs,
+        )
         visible_text = _visible_text_from_segments(segments)
         assistant_message = ChatMessage(role="assistant", content=visible_text)
         return MovieChatReply(
@@ -141,23 +145,57 @@ def _to_chat_message(message: Any) -> ChatMessage:
     return ChatMessage(role=role, content=str(getattr(message, "content", "")))
 
 
+_REF_BODY = (
+    r"P\s*\d+\s*/\s*E\s*\d+"
+    r"(?:\s*(?:[,，、;；|]|&|\band\b)\s*(?:P\s*\d+\s*/\s*)?E\s*\d+)*"
+)
 INTERNAL_REF_PATTERN = re.compile(
-    r"[ \t]*\[((?:P\d+/E\d+)(?:[ \t]*,[ \t]*(?:P\d+/)?E\d+)*)\]"
+    rf"[ \t]*(?:"
+    rf"\[\s*({_REF_BODY})\s*\]"
+    rf"|【\s*({_REF_BODY})\s*】"
+    rf"|\(\s*({_REF_BODY})\s*\)"
+    rf"|（\s*({_REF_BODY})\s*）"
+    rf")",
+    re.IGNORECASE,
+)
+INTERNAL_REF_TOKEN_PATTERN = re.compile(
+    r"(?:(P\s*\d+)\s*/\s*)?(E\s*\d+)",
+    re.IGNORECASE,
+)
+RESIDUAL_INTERNAL_REF_PATTERN = re.compile(
+    r"[ \t]*(?:"
+    r"\[[^\]\n]{0,160}P\s*\d+\s*/\s*E\s*\d+[^\]\n]{0,160}\]"
+    r"|【[^】\n]{0,160}P\s*\d+\s*/\s*E\s*\d+[^】\n]{0,160}】"
+    r"|\([^)\n]{0,160}P\s*\d+\s*/\s*E\s*\d+[^)\n]{0,160}\)"
+    r"|（[^）\n]{0,160}P\s*\d+\s*/\s*E\s*\d+[^）\n]{0,160}）"
+    r")",
+    re.IGNORECASE,
+)
+UNTERMINATED_INTERNAL_REF_PATTERN = re.compile(
+    r"[ \t]*[\[【(（]\s*P\s*\d+\s*/\s*E\s*\d+(?:\s*[,，、;；|&]\s*(?:P\s*\d+\s*/\s*)?E\s*\d+)*\s*$",
+    re.IGNORECASE,
 )
 
 
-def split_internal_refs(text: str) -> list[AnswerSegment]:
+def split_internal_refs(
+    text: str,
+    *,
+    allowed_refs: set[str] | None = None,
+) -> list[AnswerSegment]:
     """Remove compact refs from visible text while preserving anchor metadata."""
     segments: list[AnswerSegment] = []
     cursor = 0
     for match in INTERNAL_REF_PATTERN.finditer(text):
-        chunk = text[cursor : match.start()]
-        refs = _expand_refs(match.group(1))
+        chunk = _strip_residual_internal_refs(text[cursor : match.start()])
+        raw_refs = next(group for group in match.groups() if group is not None)
+        refs = _expand_refs(raw_refs)
+        if allowed_refs is not None:
+            refs = [ref for ref in refs if ref in allowed_refs]
         if chunk or refs:
             segments.append(AnswerSegment(text=chunk, citations=refs))
         cursor = match.end()
 
-    tail = text[cursor:]
+    tail = _strip_residual_internal_refs(text[cursor:])
     if tail or not segments:
         segments.append(AnswerSegment(text=tail, citations=[]))
     return _merge_empty_segments(segments)
@@ -165,6 +203,7 @@ def split_internal_refs(text: str) -> list[AnswerSegment]:
 
 def _visible_text_from_segments(segments: list[AnswerSegment]) -> str:
     text = "".join(segment.text for segment in segments).strip()
+    text = _strip_residual_internal_refs(text)
     text = re.sub(r"[ \t]+([。！？；：，、])", r"\1", text)
     text = re.sub(r"(?<=[。！？；：，、])[ \t]+(?=\S)", "", text)
     text = re.sub(r"[ \t]+\n", "\n", text)
@@ -174,16 +213,27 @@ def _visible_text_from_segments(segments: list[AnswerSegment]) -> str:
 def _expand_refs(raw_refs: str) -> list[str]:
     refs: list[str] = []
     current_pair = ""
-    for item in raw_refs.split(","):
-        ref = item.strip()
-        if not ref:
+    for match in INTERNAL_REF_TOKEN_PATTERN.finditer(raw_refs):
+        pair = match.group(1)
+        if pair:
+            current_pair = _normalize_ref_label(pair)
+        if not current_pair:
             continue
-        if "/" in ref:
-            current_pair = ref.split("/", 1)[0]
-            refs.append(ref)
-        elif current_pair and ref.startswith("E"):
-            refs.append(f"{current_pair}/{ref}")
+        evidence = _normalize_ref_label(match.group(2))
+        citation = f"{current_pair}/{evidence}"
+        if citation not in refs:
+            refs.append(citation)
     return refs
+
+
+def _normalize_ref_label(value: str) -> str:
+    compact = re.sub(r"\s+", "", value).upper()
+    return f"{compact[0]}{int(compact[1:])}"
+
+
+def _strip_residual_internal_refs(text: str) -> str:
+    text = RESIDUAL_INTERNAL_REF_PATTERN.sub("", text)
+    return UNTERMINATED_INTERNAL_REF_PATTERN.sub("", text)
 
 
 def _merge_empty_segments(segments: list[AnswerSegment]) -> list[AnswerSegment]:

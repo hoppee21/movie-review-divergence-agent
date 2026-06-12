@@ -147,54 +147,31 @@ type TextBlock =
   | { type: "paragraph"; tokens: InlineToken[] }
   | { type: "list"; items: InlineToken[][] };
 
-const citationPattern = /[ \t]*\[((?:P\d+\/E\d+)(?:[ \t]*,[ \t]*(?:P\d+\/)?E\d+)*)\]/g;
 const leadingPunctuationPattern = /^([。！？；：，、,.!?;:]+)/;
 const bulletMarkerPattern = /^\s*(?:[-*•·]\s+|\d+[.)、]\s+)/;
 
 function parseAnswerBlocks(text: string): TextBlock[] {
-  return blocksFromLines(splitTokensIntoLines(tokensFromRawAnswer(text)));
+  return blocksFromLines(splitTokensIntoLines([{ type: "text", text }]));
 }
 
-function tokensFromRawAnswer(text: string): InlineToken[] {
+function parseAnswerSegments(segments: AnswerSegment[], fallbackText: string): TextBlock[] {
   const tokens: InlineToken[] = [];
-  const pattern = new RegExp(citationPattern);
-  let cursor = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = pattern.exec(text)) !== null) {
-    appendTextToken(tokens, text.slice(cursor, match.index));
-    cursor = match.index + match[0].length;
-
-    const afterRef = text.slice(cursor);
-    const punctuation = afterRef.match(leadingPunctuationPattern)?.[1] ?? "";
-    if (punctuation) {
-      appendTextToken(tokens, punctuation);
-      cursor += punctuation.length;
-      pattern.lastIndex = cursor;
+  for (const segment of segments) {
+    let text = segment.text;
+    const previous = tokens[tokens.length - 1];
+    const punctuation = text.match(leadingPunctuationPattern)?.[1] ?? "";
+    if (punctuation && previous?.type === "citation") {
+      tokens.splice(tokens.length - 1, 0, { type: "text", text: punctuation });
+      text = text.slice(punctuation.length);
     }
-
-    const citations = expandCitationRefs(match[1]);
-    if (citations.length > 0) tokens.push({ type: "citation", citations });
-  }
-
-  appendTextToken(tokens, text.slice(cursor));
-  return tokens;
-}
-
-function expandCitationRefs(rawRefs: string): string[] {
-  const refs: string[] = [];
-  let currentPair = "";
-  for (const item of rawRefs.split(",")) {
-    const ref = item.trim();
-    if (!ref) continue;
-    if (ref.includes("/")) {
-      currentPair = ref.split("/", 1)[0];
-      refs.push(ref);
-    } else if (currentPair && ref.startsWith("E")) {
-      refs.push(`${currentPair}/${ref}`);
+    appendTextToken(tokens, text);
+    if (segment.citations.length > 0) {
+      tokens.push({ type: "citation", citations: [...new Set(segment.citations)] });
     }
   }
-  return refs;
+
+  if (tokens.length === 0) return parseAnswerBlocks(fallbackText);
+  return blocksFromLines(splitTokensIntoLines(tokens));
 }
 
 function appendTextToken(tokens: InlineToken[], text: string) {
@@ -605,8 +582,8 @@ const AnalysisReport = ({ analysis }: { analysis: AnalysisResp }) => {
     [analysis.evidence_refs]
   );
   const blocks = useMemo(
-    () => parseAnswerBlocks(analysis.raw_answer || analysis.answer),
-    [analysis.raw_answer, analysis.answer]
+    () => parseAnswerSegments(analysis.segments, analysis.answer),
+    [analysis.segments, analysis.answer]
   );
 
   return (
