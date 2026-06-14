@@ -46,15 +46,28 @@ type AnswerSegment = {
 type AnalysisLanguage = "zh" | "en";
 
 type AnalysisResp = {
+  session_id: string;
   movie_key: string;
   movie_title: string;
   language: AnalysisLanguage;
   evidence_count: number;
   pair_count: number;
+  remaining_questions: number;
+  suggested_questions: string[];
   answer: string;
   raw_answer: string;
   segments: AnswerSegment[];
   evidence_refs: EvidenceRef[];
+};
+
+type FollowUpResp = {
+  session_id: string;
+  question: string;
+  focus_refs: string[];
+  remaining_questions: number;
+  answer: string;
+  raw_answer: string;
+  segments: AnswerSegment[];
 };
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8000";
@@ -363,7 +376,8 @@ function renderInlineMarkdown(text: string) {
 function renderInlineTokens(
   tokens: InlineToken[],
   evidenceMap: Map<string, EvidenceRef>,
-  language: AnalysisLanguage
+  language: AnalysisLanguage,
+  onAskEvidence?: (citations: string[]) => void
 ) {
   return tokens.map((token, index) => {
     if (token.type === "citation") {
@@ -373,6 +387,7 @@ function renderInlineTokens(
           citations={token.citations}
           evidenceMap={evidenceMap}
           language={language}
+          onAskEvidence={onAskEvidence}
         />
       );
     }
@@ -441,10 +456,12 @@ const EvidencePopover = ({
   citations,
   evidenceMap,
   language,
+  onAskEvidence,
 }: {
   citations: string[];
   evidenceMap: Map<string, EvidenceRef>;
   language: AnalysisLanguage;
+  onAskEvidence?: (citations: string[]) => void;
 }) => {
   const refs = citations.map((citation) => evidenceMap.get(citation)).filter(Boolean) as EvidenceRef[];
   const [open, setOpen] = useState(false);
@@ -459,14 +476,15 @@ const EvidencePopover = ({
     const rect = button.getBoundingClientRect();
     const margin = 16;
     const width = Math.min(440, window.innerWidth - margin * 2);
-    const maxHeight = Math.min(420, window.innerHeight - margin * 2);
     const left = clamp(rect.left, margin, window.innerWidth - width - margin);
     const spaceBelow = window.innerHeight - rect.bottom - margin;
     const spaceAbove = rect.top - margin;
-    const top =
-      spaceBelow >= 240 || spaceBelow >= spaceAbove
-        ? rect.bottom + 8
-        : Math.max(margin, rect.top - maxHeight - 8);
+    const openBelow = spaceBelow >= 320 || spaceBelow >= spaceAbove;
+    const availableHeight = Math.max(160, openBelow ? spaceBelow : spaceAbove);
+    const maxHeight = Math.min(420, availableHeight);
+    const top = openBelow
+      ? rect.bottom + 8
+      : Math.max(margin, rect.top - maxHeight - 8);
     setPosition({ top, left, width, maxHeight });
   }
 
@@ -504,7 +522,7 @@ const EvidencePopover = ({
     ? createPortal(
         <div
           ref={panelRef}
-          className="fixed z-[80] rounded-lg border border-neutral-700 bg-neutral-950 p-3 text-left shadow-2xl shadow-black/60"
+          className="fixed z-[80] overflow-hidden rounded-lg border border-neutral-700 bg-neutral-950 p-3 text-left shadow-2xl shadow-black/60"
           style={{
             top: position.top,
             left: position.left,
@@ -524,7 +542,7 @@ const EvidencePopover = ({
           </div>
           <div
             className="space-y-3 overflow-y-auto pr-1 custom-scrollbar"
-            style={{ maxHeight: position.maxHeight - 48 }}
+            style={{ maxHeight: position.maxHeight - (onAskEvidence ? 96 : 48) }}
           >
             {refs.map((ref) => (
               <div key={ref.citation} className="rounded-md border border-neutral-800 bg-neutral-900/70 p-3">
@@ -546,6 +564,18 @@ const EvidencePopover = ({
               </div>
             ))}
           </div>
+          {onAskEvidence && (
+            <button
+              type="button"
+              onClick={() => {
+                onAskEvidence(citations);
+                setOpen(false);
+              }}
+              className="mt-3 w-full rounded border border-amber-400/40 bg-amber-300/10 px-3 py-2 text-xs font-semibold text-amber-100 hover:bg-amber-300/20"
+            >
+              {language === "zh" ? "就此证据提问" : "Ask about this evidence"}
+            </button>
+          )}
         </div>,
         document.body
       )
@@ -576,46 +606,216 @@ const EvidencePopover = ({
   );
 };
 
-const AnalysisReport = ({ analysis }: { analysis: AnalysisResp }) => {
+const AnswerBlocks = ({
+  segments,
+  answer,
+  evidenceMap,
+  language,
+  onAskEvidence,
+}: {
+  segments: AnswerSegment[];
+  answer: string;
+  evidenceMap: Map<string, EvidenceRef>;
+  language: AnalysisLanguage;
+  onAskEvidence?: (citations: string[]) => void;
+}) => {
+  const blocks = useMemo(
+    () => parseAnswerSegments(segments, answer),
+    [segments, answer]
+  );
+
+  return (
+    <>
+      {blocks.map((block, index) =>
+        block.type === "list" ? (
+          <div key={index} className="my-5 space-y-4">
+            {block.items.map((item, itemIndex) => (
+              <p key={`${index}-${itemIndex}`} className="border-l border-neutral-800 pl-4">
+                {renderInlineTokens(item, evidenceMap, language, onAskEvidence)}
+              </p>
+            ))}
+          </div>
+        ) : (
+          <p key={index} className="my-5">
+            {renderInlineTokens(block.tokens, evidenceMap, language, onAskEvidence)}
+          </p>
+        )
+      )}
+    </>
+  );
+};
+
+const AnalysisReport = ({
+  analysis,
+  followUps,
+  question,
+  focusRefs,
+  loadingFollowUp,
+  followUpError,
+  onQuestionChange,
+  onFocusEvidence,
+  onClearFocus,
+  onSubmitQuestion,
+}: {
+  analysis: AnalysisResp;
+  followUps: FollowUpResp[];
+  question: string;
+  focusRefs: string[];
+  loadingFollowUp: boolean;
+  followUpError: string | null;
+  onQuestionChange: (value: string) => void;
+  onFocusEvidence: (citations: string[]) => void;
+  onClearFocus: () => void;
+  onSubmitQuestion: () => void;
+}) => {
   const evidenceMap = useMemo(
     () => new Map(analysis.evidence_refs.map((ref) => [ref.citation, ref])),
     [analysis.evidence_refs]
   );
-  const blocks = useMemo(
-    () => parseAnswerSegments(analysis.segments, analysis.answer),
-    [analysis.segments, analysis.answer]
-  );
+  const canAsk = analysis.remaining_questions > 0 && !loadingFollowUp;
+  const isChinese = analysis.language === "zh";
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="mb-4 grid grid-cols-2 gap-3 text-xs">
-        <div className="rounded-lg border border-neutral-800 bg-neutral-900 p-3">
-          <div className="text-neutral-500">Evidence</div>
-          <div className="mt-1 font-mono text-lg text-neutral-100">{analysis.evidence_count}</div>
+      <div className="min-h-0 flex-1 overflow-y-auto pr-2 custom-scrollbar">
+        <div className="mb-4 grid grid-cols-2 gap-3 text-xs">
+          <div className="rounded-lg border border-neutral-800 bg-neutral-900 p-3">
+            <div className="text-neutral-500">Evidence</div>
+            <div className="mt-1 font-mono text-lg text-neutral-100">{analysis.evidence_count}</div>
+          </div>
+          <div className="rounded-lg border border-neutral-800 bg-neutral-900 p-3">
+            <div className="text-neutral-500">Pairs</div>
+            <div className="mt-1 font-mono text-lg text-neutral-100">{analysis.pair_count}</div>
+          </div>
         </div>
-        <div className="rounded-lg border border-neutral-800 bg-neutral-900 p-3">
-          <div className="text-neutral-500">Pairs</div>
-          <div className="mt-1 font-mono text-lg text-neutral-100">{analysis.pair_count}</div>
-        </div>
-      </div>
 
-      <article className="analysis-copy min-h-0 max-w-5xl flex-1 overflow-y-auto pr-2 text-[15px] leading-8 text-neutral-200 custom-scrollbar">
-        {blocks.map((block, index) =>
-          block.type === "list" ? (
-            <div key={index} className="my-5 space-y-4">
-              {block.items.map((item, itemIndex) => (
-                <p key={`${index}-${itemIndex}`} className="border-l border-neutral-800 pl-4">
-                  {renderInlineTokens(item, evidenceMap, analysis.language)}
-                </p>
+        <article className="analysis-copy max-w-5xl text-[15px] leading-8 text-neutral-200">
+          <AnswerBlocks
+            segments={analysis.segments}
+            answer={analysis.answer}
+            evidenceMap={evidenceMap}
+            language={analysis.language}
+            onAskEvidence={onFocusEvidence}
+          />
+        </article>
+
+        {followUps.length > 0 && (
+          <section className="mt-8 max-w-5xl border-t border-neutral-800 pt-6">
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
+              {isChinese ? "追问记录" : "Follow-up discussion"}
+            </h4>
+            <div className="mt-5 space-y-7">
+              {followUps.map((turn, index) => (
+                <article key={`${turn.session_id}-${index}`}>
+                  <div className="mb-3 flex items-start gap-3">
+                    <span className="mt-0.5 shrink-0 rounded bg-neutral-800 px-2 py-1 text-[10px] font-semibold uppercase text-neutral-400">
+                      {isChinese ? "你" : "You"}
+                    </span>
+                    <p className="text-sm leading-6 text-neutral-100">{turn.question}</p>
+                  </div>
+                  <div className="border-l border-neutral-800 pl-4 text-sm leading-7 text-neutral-300">
+                    <AnswerBlocks
+                      segments={turn.segments}
+                      answer={turn.answer}
+                      evidenceMap={evidenceMap}
+                      language={analysis.language}
+                      onAskEvidence={onFocusEvidence}
+                    />
+                  </div>
+                </article>
               ))}
             </div>
-          ) : (
-            <p key={index} className="my-5">
-              {renderInlineTokens(block.tokens, evidenceMap, analysis.language)}
-            </p>
-          )
+          </section>
         )}
-      </article>
+      </div>
+
+      <div className="mt-4 shrink-0 border-t border-neutral-800 pt-4">
+        {analysis.remaining_questions > 0 && (
+          <div className="mb-3 flex gap-2 overflow-x-auto pb-1 custom-scrollbar">
+            {analysis.suggested_questions.map((suggestion) => (
+              <button
+                key={suggestion}
+                type="button"
+                onClick={() => onQuestionChange(suggestion)}
+                disabled={loadingFollowUp}
+                className="shrink-0 rounded border border-neutral-800 bg-neutral-900 px-3 py-1.5 text-xs text-neutral-300 hover:border-neutral-700 hover:text-white disabled:opacity-50"
+              >
+                {suggestion}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {focusRefs.length > 0 && (
+          <div className="mb-2 flex items-center gap-2 text-xs text-amber-200">
+            <span className="rounded bg-amber-300/10 px-2 py-1">
+              {isChinese
+                ? `已聚焦 ${focusRefs.length} 条证据`
+                : `${focusRefs.length} focused evidence item${focusRefs.length === 1 ? "" : "s"}`}
+            </span>
+            <button
+              type="button"
+              onClick={onClearFocus}
+              className="text-neutral-500 hover:text-neutral-200"
+            >
+              {isChinese ? "取消" : "Clear"}
+            </button>
+          </div>
+        )}
+
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            onSubmitQuestion();
+          }}
+          className="flex items-end gap-3"
+        >
+          <div className="min-w-0 flex-1">
+            <textarea
+              rows={2}
+              maxLength={200}
+              value={question}
+              onChange={(event) => onQuestionChange(event.target.value)}
+              disabled={!canAsk}
+              placeholder={
+                analysis.remaining_questions > 0
+                  ? isChinese
+                    ? "就这份报告继续追问..."
+                    : "Ask about this report..."
+                  : isChinese
+                    ? "本次分析的追问已用完"
+                    : "No follow-up questions remaining"
+              }
+              className="block max-h-28 min-h-16 w-full resize-y rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2 text-sm leading-6 text-neutral-100 outline-none placeholder:text-neutral-600 focus:border-amber-300/60 disabled:cursor-not-allowed disabled:opacity-60"
+            />
+            <div className="mt-1 flex items-center justify-between text-[11px] text-neutral-600">
+              <span>
+                {isChinese
+                  ? `仅使用当前电影证据 · 剩余 ${analysis.remaining_questions} 次`
+                  : `Current movie evidence only · ${analysis.remaining_questions} remaining`}
+              </span>
+              <span>{question.length}/200</span>
+            </div>
+          </div>
+          <button
+            type="submit"
+            disabled={!canAsk || !question.trim()}
+            className="h-10 shrink-0 rounded bg-amber-400 px-4 text-sm font-semibold text-neutral-950 hover:bg-amber-300 disabled:cursor-not-allowed disabled:bg-neutral-800 disabled:text-neutral-500"
+          >
+            {loadingFollowUp
+              ? isChinese
+                ? "回答中..."
+                : "Answering..."
+              : isChinese
+                ? "追问"
+                : "Ask"}
+          </button>
+        </form>
+
+        {followUpError && (
+          <div className="mt-2 text-xs leading-5 text-red-300">{followUpError}</div>
+        )}
+      </div>
     </div>
   );
 };
@@ -625,19 +825,34 @@ const MovieDetailModal = ({ movie, onClose }: { movie: Movie | null; onClose: ()
   const [analysesByLanguage, setAnalysesByLanguage] = useState<
     Partial<Record<AnalysisLanguage, AnalysisResp>>
   >({});
+  const [followUpsByLanguage, setFollowUpsByLanguage] = useState<
+    Partial<Record<AnalysisLanguage, FollowUpResp[]>>
+  >({});
+  const [question, setQuestion] = useState("");
+  const [focusRefs, setFocusRefs] = useState<string[]>([]);
   const [loadingAnalysis, setLoadingAnalysis] = useState(false);
+  const [loadingFollowUp, setLoadingFollowUp] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [followUpError, setFollowUpError] = useState<string | null>(null);
   const analysisControllerRef = useRef<AbortController | null>(null);
+  const followUpControllerRef = useRef<AbortController | null>(null);
   const analysis = analysesByLanguage[analysisLanguage] ?? null;
+  const followUps = followUpsByLanguage[analysisLanguage] ?? [];
 
   useEffect(() => {
     if (!movie) return;
     setAnalysesByLanguage({});
+    setFollowUpsByLanguage({});
+    setQuestion("");
+    setFocusRefs([]);
     setAnalysisError(null);
+    setFollowUpError(null);
     analysisControllerRef.current?.abort();
+    followUpControllerRef.current?.abort();
 
     return () => {
       analysisControllerRef.current?.abort();
+      followUpControllerRef.current?.abort();
     };
   }, [movie]);
 
@@ -665,6 +880,7 @@ const MovieDetailModal = ({ movie, onClose }: { movie: Movie | null; onClose: ()
       }
       const result = (await response.json()) as AnalysisResp;
       setAnalysesByLanguage((previous) => ({ ...previous, [language]: result }));
+      setFollowUpsByLanguage((previous) => ({ ...previous, [language]: [] }));
     } catch (err: any) {
       if (err?.name !== "AbortError") {
         setAnalysisError(err?.message ?? "Analysis failed");
@@ -679,12 +895,90 @@ const MovieDetailModal = ({ movie, onClose }: { movie: Movie | null; onClose: ()
   function changeAnalysisLanguage(language: AnalysisLanguage) {
     if (language === analysisLanguage) return;
     setAnalysisLanguage(language);
+    setQuestion("");
+    setFocusRefs([]);
     setAnalysisError(null);
+    setFollowUpError(null);
     analysisControllerRef.current?.abort();
+    followUpControllerRef.current?.abort();
+  }
+
+  function focusEvidence(citations: string[]) {
+    const refs = [...new Set(citations)].slice(0, 4);
+    setFocusRefs(refs);
+    setQuestion(
+      analysisLanguage === "zh"
+        ? "这组证据如何支持或削弱报告中的结论？"
+        : "How does this evidence support or weaken the report's conclusion?"
+    );
+    setFollowUpError(null);
+  }
+
+  async function submitFollowUp() {
+    const text = question.trim();
+    if (!analysis || !text || loadingFollowUp || analysis.remaining_questions <= 0) return;
+    followUpControllerRef.current?.abort();
+    const controller = new AbortController();
+    followUpControllerRef.current = controller;
+    setLoadingFollowUp(true);
+    setFollowUpError(null);
+    try {
+      const response = await fetch(`${API_BASE}/analysis/${analysis.session_id}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
+        body: JSON.stringify({ question: text, focus_refs: focusRefs }),
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        const detail = payload?.detail;
+        throw new Error(
+          typeof detail === "string"
+            ? detail
+            : detail?.message ?? (analysisLanguage === "zh" ? "追问失败" : "Follow-up failed")
+        );
+      }
+      const result = (await response.json()) as FollowUpResp;
+      setFollowUpsByLanguage((previous) => ({
+        ...previous,
+        [analysisLanguage]: [...(previous[analysisLanguage] ?? []), result],
+      }));
+      setAnalysesByLanguage((previous) => ({
+        ...previous,
+        [analysisLanguage]: previous[analysisLanguage]
+          ? {
+              ...previous[analysisLanguage]!,
+              remaining_questions: result.remaining_questions,
+            }
+          : previous[analysisLanguage],
+      }));
+      setQuestion("");
+      setFocusRefs([]);
+    } catch (err: any) {
+      if (err?.name !== "AbortError") {
+        setFollowUpError(err?.message ?? "Follow-up failed");
+      }
+    } finally {
+      if (followUpControllerRef.current === controller) {
+        setLoadingFollowUp(false);
+      }
+    }
+  }
+
+  function closeModal() {
+    for (const item of Object.values(analysesByLanguage)) {
+      if (item?.session_id) {
+        void fetch(`${API_BASE}/analysis/${item.session_id}`, {
+          method: "DELETE",
+          keepalive: true,
+        });
+      }
+    }
+    onClose();
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-2 backdrop-blur-sm sm:p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-2 backdrop-blur-sm sm:p-4" onClick={closeModal}>
       <div
         onClick={(event) => event.stopPropagation()}
         className="flex h-[calc(100vh-1rem)] w-full max-w-[min(96rem,calc(100vw-1rem))] flex-col overflow-hidden rounded-lg border border-neutral-800 bg-neutral-950 shadow-2xl sm:h-[calc(100vh-2rem)] md:flex-row"
@@ -773,7 +1067,7 @@ const MovieDetailModal = ({ movie, onClose }: { movie: Movie | null; onClose: ()
                 })}
               </div>
               <button
-                onClick={onClose}
+                onClick={closeModal}
                 className="rounded border border-neutral-800 px-3 py-2 text-sm text-neutral-400 hover:bg-neutral-900 hover:text-white"
                 type="button"
               >
@@ -812,7 +1106,23 @@ const MovieDetailModal = ({ movie, onClose }: { movie: Movie | null; onClose: ()
             </div>
           )}
 
-          {analysis && !loadingAnalysis && <AnalysisReport analysis={analysis} />}
+          {analysis && !loadingAnalysis && (
+            <AnalysisReport
+              analysis={analysis}
+              followUps={followUps}
+              question={question}
+              focusRefs={focusRefs}
+              loadingFollowUp={loadingFollowUp}
+              followUpError={followUpError}
+              onQuestionChange={(value) => {
+                setQuestion(value);
+                setFollowUpError(null);
+              }}
+              onFocusEvidence={focusEvidence}
+              onClearFocus={() => setFocusRefs([])}
+              onSubmitQuestion={() => void submitFollowUp()}
+            />
+          )}
         </main>
       </div>
     </div>

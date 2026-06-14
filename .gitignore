@@ -55,8 +55,9 @@ selected_movies.csv
 *.ipynb
 .ipynb_checkpoints/
 reviews.jsonl
-web_artifacts.zip
-chroma_divergence_evidence/
+*.zip
+*.sqlite3
+chroma_divergence_evidence*/
 divergence_evidence_artifacts/chroma/
 divergence_evidence_artifacts/*.jsonl
 divergence_evidence_artifacts/*.csv

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
 ChatRole = Literal["system", "user", "assistant"]
+AnalysisLanguage = Literal["zh", "en"]
 
 
 class ChatMessage(BaseModel):
@@ -65,3 +67,31 @@ class MovieChatReply(BaseModel):
     raw_assistant_message: ChatMessage | None = None
     segments: list[AnswerSegment] = Field(default_factory=list)
     user_message: ChatMessage | None = None
+
+
+class ConversationTurn(BaseModel):
+    """One public follow-up turn inside a bounded evidence conversation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    question: str
+    focus_refs: list[str] = Field(default_factory=list)
+    answer: str
+    raw_answer: str
+    segments: list[AnswerSegment] = Field(default_factory=list)
+
+
+class ConversationRecord(BaseModel):
+    """Server-side record for one language-specific movie analysis session."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str
+    language: AnalysisLanguage
+    chat_state: MovieChatState
+    model: str | None = None
+    temperature: float = 0.0
+    remaining_questions: int
+    turns: list[ConversationTurn] = Field(default_factory=list)
+    created_at: datetime
+    expires_at: datetime

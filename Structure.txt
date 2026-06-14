@@ -1,66 +1,31 @@
-cross-cultural-review-agent/
-├── artifacts/
-│   ├── manifest.json
-│   ├── movies.json
-│   ├── movies.csv
-│   ├── movies.parquet
-│   ├── themes.csv
-│   ├── themes.jsonl
-│   ├── themes.parquet
-│   └── movie_details/
-│       ├── tt0036628_1305158.json
-│       └── ...
-│
-├── outputs/
-│   ├── reports/
-│   ├── traces/
-│   └── sessions/
-│
+movie-review-divergence-agent/
 ├── app/
-│   ├── schemas/
-│   │   ├── artifact_index.py
-│   │   ├── artifact_dossier.py
-│   │   ├── runtime_context.py
-│   │   └── trace.py
-│   │
-│   ├── repositories/
-│   │   ├── manifest_repository.py
-│   │   ├── movie_index_repository.py
-│   │   ├── dossier_repository.py
-│   │   ├── report_repository.py
-│   │   └── session_repository.py
-│   │
-│   ├── memory/
-│   │   ├── session_state.py
-│   │   ├── context_store.py
-│   │   └── report_cache.py
-│   │
 │   ├── agent/
-│   │   ├── orchestrator.py
-│   │   ├── intent_router.py
-│   │   ├── movie_resolver.py
-│   │   ├── dossier_adapter.py
-│   │   ├── evidence_selector.py
-│   │   ├── context_builder.py
-│   │   ├── followup_handler.py
-│   │   └── grounding_checker.py
-│   │
-│   ├── llm/
-│   │   ├── client.py
-│   │   ├── prompts.py
-│   │   ├── renderer.py
-│   │   └── output_parser.py
-│   │
-│   ├── tui/
-│   │   └── main.py
-│   │
-│   └── utils/
-│       ├── paths.py
-│       ├── ids.py
-│       └── logging.py
-│
-└── tests/
-    ├── test_artifact_dossier.py
-    ├── test_dossier_adapter.py
-    ├── test_context_builder.py
-    └── test_agent_flow.py
+│   │   └── core.py                  # selected movie -> all Chroma evidence -> prompt
+│   ├── chat/
+│   │   ├── models.py                # serializable replies, evidence refs, session records
+│   │   ├── openai_client.py         # LangChain/OpenAI adapter
+│   │   ├── policy.py                # follow-up limits and evidence focus validation
+│   │   ├── service.py               # bounded conversation application service
+│   │   ├── session.py               # stateful evidence-grounded LLM history
+│   │   └── store.py                 # replaceable conversation store
+│   └── api.py                       # movie, analysis, follow-up, and poster endpoints
+├── frontend/
+│   └── src/
+│       ├── App.tsx                  # movie explorer, reports, popovers, follow-ups
+│       ├── index.css
+│       └── main.tsx
+├── scripts/
+│   ├── movie_chat.py                # terminal multi-turn client
+│   ├── run_api.py
+│   └── show_prompt.py
+├── config/
+│   └── openai.example.yml
+├── divergence_evidence_artifacts/
+│   └── chroma_divergence_evidence_manifest.json
+├── docs/
+│   └── assets/
+│       ├── evidence-analysis.png
+│       └── movie-explorer.png
+├── README.md
+└── requirements.txt

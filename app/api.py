@@ -14,7 +14,12 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.agent import DEFAULT_QUESTION, MovieEvidencePromptCore
-from app.chat import LangChainOpenAIChatClient, MovieChatSession
+from app.chat import (
+    ConversationNotFoundError,
+    ConversationPolicyError,
+    LangChainOpenAIChatClient,
+    MovieConversationService,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -58,24 +63,43 @@ class MovieListResponse(BaseModel):
 class AnalysisRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    question: str = DEFAULT_QUESTION
     language: Literal["zh", "en"] = "zh"
-    model: str | None = None
-    temperature: float = 0.0
 
 
 class AnalysisResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    session_id: str
     movie_key: str
     movie_title: str
     language: Literal["zh", "en"]
     evidence_count: int
     pair_count: int
+    remaining_questions: int
+    suggested_questions: list[str]
     answer: str
     raw_answer: str
     segments: list[dict[str, Any]]
     evidence_refs: list[dict[str, Any]]
+
+
+class FollowUpRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    question: str = Field(min_length=1, max_length=200)
+    focus_refs: list[str] = Field(default_factory=list, max_length=4)
+
+
+class FollowUpResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str
+    question: str
+    focus_refs: list[str]
+    remaining_questions: int
+    answer: str
+    raw_answer: str
+    segments: list[dict[str, Any]]
 
 
 @lru_cache(maxsize=1)
@@ -122,6 +146,19 @@ def get_core(language: Literal["zh", "en"] = "zh") -> MovieEvidencePromptCore:
         DEFAULT_MANIFEST,
         config_overrides={"language": language},
     )
+
+
+def _build_chat_client(model: str | None, temperature: float) -> LangChainOpenAIChatClient:
+    return LangChainOpenAIChatClient.from_local_settings(
+        model=model,
+        temperature=temperature,
+    )
+
+
+conversation_service = MovieConversationService(
+    core_factory=get_core,
+    client_factory=_build_chat_client,
+)
 
 
 def create_app() -> Any:
@@ -188,30 +225,60 @@ def create_app() -> Any:
         if not any(item.movie_key == movie_key for item in load_movies()):
             raise HTTPException(status_code=404, detail="Movie not found")
 
-        session = MovieChatSession.from_movie_key(
-            get_core(request.language),
-            movie_key,
-            question=request.question,
-        )
-        if session.evidence_count == 0:
-            raise HTTPException(status_code=404, detail="No evidence found for movie")
+        try:
+            result = conversation_service.create_analysis(
+                movie_key=movie_key,
+                language=request.language,
+                question=DEFAULT_QUESTION,
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-        client = LangChainOpenAIChatClient.from_local_settings(
-            model=request.model,
-            temperature=request.temperature,
-        )
-        reply = session.initial_answer(client)
+        reply = result.reply
         return AnalysisResponse(
-            movie_key=session.movie_key,
-            movie_title=session.movie_title,
+            session_id=result.session_id,
+            movie_key=reply.state.movie_key,
+            movie_title=reply.state.movie_title,
             language=request.language,
-            evidence_count=session.evidence_count,
-            pair_count=session.pair_count,
+            evidence_count=reply.state.evidence_count,
+            pair_count=reply.state.pair_count,
+            remaining_questions=result.remaining_questions,
+            suggested_questions=result.suggested_questions,
             answer=reply.assistant_message.content,
             raw_answer=reply.raw_assistant_message.content if reply.raw_assistant_message else "",
             segments=[segment.model_dump() for segment in reply.segments],
-            evidence_refs=[ref.model_dump() for ref in session.evidence_refs],
+            evidence_refs=[ref.model_dump() for ref in reply.state.evidence_refs],
         )
+
+    @api.post("/analysis/{session_id}/messages", response_model=FollowUpResponse)
+    def ask_analysis(session_id: str, request: FollowUpRequest) -> FollowUpResponse:
+        try:
+            result = conversation_service.ask(
+                session_id=session_id,
+                question=request.question,
+                focus_refs=request.focus_refs,
+            )
+        except ConversationNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ConversationPolicyError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": exc.code, "message": str(exc)},
+            ) from exc
+
+        return FollowUpResponse(
+            session_id=result.session_id,
+            question=result.turn.question,
+            focus_refs=result.turn.focus_refs,
+            remaining_questions=result.remaining_questions,
+            answer=result.turn.answer,
+            raw_answer=result.turn.raw_answer,
+            segments=[segment.model_dump() for segment in result.turn.segments],
+        )
+
+    @api.delete("/analysis/{session_id}", status_code=204)
+    def delete_analysis(session_id: str) -> None:
+        conversation_service.delete(session_id)
 
     return api
 
