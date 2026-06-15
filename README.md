@@ -2,7 +2,7 @@
 
 # Movie Review Divergence Agent
 
-**Turn IMDb and Douban rating gaps into evidence-grounded, explorable analysis.**
+**Turn an IMDb/Douban rating gap into an evidence-grounded explanation.**
 
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-API-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
@@ -10,59 +10,88 @@
 [![Chroma](https://img.shields.io/badge/Chroma-Evidence_Index-F5C518)](https://www.trychroma.com/)
 [![React](https://img.shields.io/badge/React-Frontend-61DAFB?logo=react&logoColor=111)](https://react.dev/)
 
+Explore rating gaps · Read grounded reports · Inspect the evidence · Ask focused follow-ups
+
 </div>
 
 ![Movie explorer showing IMDb and Douban rating gaps](docs/assets/movie-explorer.png)
 
-## What It Does
+## Why This Exists
 
-Movie Review Divergence Agent explains **why the same movie is judged
-differently on IMDb and Douban**. It retrieves the complete, offline-selected
-evidence for one movie, asks an LLM to synthesize only that evidence, and turns
-citations into source popovers that users can inspect and question.
+A rating gap tells us that two audiences reacted differently. It does not tell
+us **what they disagreed about**, whether the difference is a real clash of
+viewpoints, or simply a difference in scoring severity.
 
-| Experience | How it works |
-| --- | --- |
-| Compare platforms | Browse movies ranked by their IMDb/Douban rating gap. |
-| Generate grounded reports | Analyze only the evidence stored for the selected movie. |
-| Inspect sources | Open citation popovers without exposing internal reference syntax. |
-| Continue the conversation | Ask up to five focused follow-up questions per report. |
-| Switch languages | Maintain independent Chinese and English analysis sessions. |
+Movie Review Divergence Agent turns that gap into an explanation. For a
+selected movie, it loads the complete set of offline-selected IMDb and Douban
+evidence, generates a report grounded only in those reviews, and lets the user
+inspect or question the sources behind each claim.
 
-## Product Experience
+> The runtime does not search for convenient reviews or invent cultural causes.
+> It explains only what the fixed evidence set can support.
 
-The report view keeps the movie context, platform ratings, evidence-backed
-analysis, source actions, and bounded follow-up conversation in one workspace.
+## From Rating Gap to Explanation
+
+| Step | User experience | Evidence behavior |
+| --- | --- | --- |
+| **1. Discover** | Browse and sort movies by their cross-platform rating gap. | The movie catalog identifies where disagreement may be worth examining. |
+| **2. Explain** | Generate a concise Chinese or English divergence report. | Every claim is constrained to the selected movie's Chroma evidence. |
+| **3. Explore** | Open source popovers or ask up to five focused follow-ups. | Follow-ups remain inside the same evidence set and conversation session. |
+
+The result is a report that stays readable for a movie audience while retaining
+an inspectable path back to the original reviews.
 
 ![Evidence-grounded analysis and follow-up conversation](docs/assets/evidence-analysis.png)
 
-## Architecture
+## What You Can Explore
+
+- **Real disagreement versus rating severity:** distinguish opposing viewpoints
+  from cases where both sides notice the same weakness but score it differently.
+- **Evidence behind the summary:** open citation popovers without exposing raw
+  internal reference syntax in the report.
+- **Bounded conversation:** ask focused questions without allowing the agent to
+  drift into another movie or outside knowledge.
+- **Independent bilingual sessions:** switch between Chinese and English
+  reports without mixing their conversation history.
+
+## Under the Hood
+
+The runtime is intentionally narrow. Selecting a movie fixes the evidence set;
+the service then manages the grounded report and its limited follow-up
+conversation.
 
 ```mermaid
 flowchart LR
-    UI["React movie explorer"] --> API["FastAPI"]
-    API --> SERVICE["MovieConversationService"]
-    SERVICE --> POLICY["ConversationPolicy"]
-    SERVICE --> STORE["ConversationStore"]
-    SERVICE --> CORE["MovieEvidencePromptCore"]
-    CORE --> CHROMA[("Local Chroma evidence")]
-    SERVICE --> LLM["LangChain OpenAI client"]
-    LLM --> SEGMENTS["Structured answer segments"]
-    SEGMENTS --> UI
+    USER["Select a movie"] --> UI["React analysis workspace"]
+    UI --> API["FastAPI"]
+    API --> CHAT["Conversation service"]
+    CHAT --> CORE["Evidence prompt core"]
+    CORE --> CHROMA[("Local Chroma index")]
+    CHAT --> LLM["LangChain LLM client"]
+    LLM --> REPORT["Structured report + citations"]
+    REPORT --> UI
 ```
 
-- `MovieEvidencePromptCore` performs one job: selected movie to complete Chroma
-  evidence to grounded prompt.
+This separation keeps evidence retrieval deterministic while allowing the LLM
+and session store to be replaced independently.
+
+<details>
+<summary><strong>Component responsibilities</strong></summary>
+
+- `MovieEvidencePromptCore` loads every stored evidence document for the
+  selected movie and builds the grounded prompt.
 - `MovieConversationService` coordinates language-specific reports and
   follow-up turns.
 - `ConversationPolicy` validates evidence focus and limits each report to five
   follow-ups.
-- `InMemoryConversationStore` owns expiring server-side sessions and can be
-  replaced without changing the agent core.
+- `InMemoryConversationStore` owns expiring server-side sessions and can later
+  be replaced with Redis.
 - The frontend renders structured answer segments and evidence popovers instead
   of parsing raw citation labels.
 
-## Quick Start
+</details>
+
+## Run Locally
 
 **Requirements:** Python 3.11 or newer and Node.js 20.19 or newer.
 
@@ -72,24 +101,17 @@ flowchart LR
    cp config/openai.example.yml config/openai.yml
    ```
 
-2. Install the backend dependencies:
+2. Install dependencies:
 
    ```bash
    pip install -r requirements.txt
+   cd frontend && npm install && cd ..
    ```
 
-3. Install the frontend dependencies:
-
-   ```bash
-   cd frontend
-   npm install
-   cd ..
-   ```
-
-4. Provide the local movie catalog and Chroma evidence assets expected by the
+3. Provide the local movie catalog and Chroma evidence assets expected by the
    API and committed manifest.
 
-5. Start the API and frontend in separate terminals:
+4. Start the API and frontend in separate terminals:
 
    ```bash
    python scripts/run_api.py
@@ -102,7 +124,9 @@ flowchart LR
 
 Open [http://127.0.0.1:5173](http://127.0.0.1:5173).
 
-## Conversation API
+Create a production frontend build with `cd frontend && npm run build`.
+
+## API Surface
 
 | Method | Endpoint | Purpose |
 | --- | --- | --- |
@@ -115,7 +139,14 @@ Open [http://127.0.0.1:5173](http://127.0.0.1:5173).
 Follow-up questions are limited to 200 characters and may focus on up to four
 evidence references from the current report.
 
-## Project Layout
+## Data Boundary
+
+Credentials, local movie data, generated evidence indexes, dependency
+directories, and build outputs are intentionally excluded from Git. The
+committed manifest defines the Chroma collection contract used by the runtime.
+
+<details>
+<summary><strong>Project layout</strong></summary>
 
 ```text
 app/
@@ -130,16 +161,4 @@ divergence_evidence_artifacts/
 └── chroma_divergence_evidence_manifest.json
 ```
 
-## Local Assets
-
-Credentials, local movie data, generated evidence indexes, dependency
-directories, and build/cache outputs are intentionally excluded from Git.
-The committed manifest defines the Chroma collection contract used by the
-runtime.
-
-## Build
-
-```bash
-cd frontend
-npm run build
-```
+</details>
