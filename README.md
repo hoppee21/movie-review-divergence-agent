@@ -22,116 +22,28 @@ A rating gap tells us that two audiences reacted differently. It does not tell
 us **what they disagreed about**, whether the difference is a real clash of
 viewpoints, or simply a difference in scoring severity.
 
-Movie Review Divergence Agent turns that gap into an explanation. For a
-selected movie, it loads the complete set of offline-selected IMDb and Douban
-evidence, generates a report grounded only in those reviews, and lets the user
-inspect or question the sources behind each claim.
+Movie Review Divergence Agent turns that gap into an evidence-grounded
+explanation. Select a movie, generate a Chinese or English report, inspect the
+reviews behind its claims, and ask focused follow-up questions.
 
 > The runtime does not search for convenient reviews or invent cultural causes.
 > It explains only what the fixed evidence set can support.
 
-## From Rating Gap to Explanation
+## What You Can Do
 
-| Step | User experience | Evidence behavior |
-| --- | --- | --- |
-| **1. Discover** | Browse and sort movies by their cross-platform rating gap. | The movie catalog identifies where disagreement may be worth examining. |
-| **2. Explain** | Generate a concise Chinese or English divergence report. | Every claim is constrained to the selected movie's Chroma evidence. |
-| **3. Explore** | Open source popovers or ask up to five focused follow-ups. | Follow-ups remain inside the same evidence set and conversation session. |
-
-The result is a report that stays readable for a movie audience while retaining
-an inspectable path back to the original reviews.
+- Browse and sort movies by their IMDb/Douban rating gap.
+- Generate a concise divergence report in Chinese or English.
+- Open evidence popovers without interrupting the reading experience.
+- Ask up to five focused follow-ups for each language-specific report.
+- Distinguish real viewpoint conflict from differences in scoring severity.
 
 ![Evidence-grounded analysis and follow-up conversation](docs/assets/evidence-analysis.png)
 
-## What You Can Explore
+## Evidence Journey
 
-- **Real disagreement versus rating severity:** distinguish opposing viewpoints
-  from cases where both sides notice the same weakness but score it differently.
-- **Evidence behind the summary:** open citation popovers without exposing raw
-  internal reference syntax in the report.
-- **Bounded conversation:** ask focused questions without allowing the agent to
-  drift into another movie or outside knowledge.
-- **Independent bilingual sessions:** switch between Chinese and English
-  reports without mixing their conversation history.
-
-## How the Evidence Stays Grounded
-
-The runtime is intentionally narrow. Selecting a movie fixes the evidence set;
-the service then manages the grounded report and its limited follow-up
-conversation. Catalog browsing and poster loading stay outside the LLM path.
-
-```mermaid
-flowchart TB
-    subgraph FRONTEND["React frontend"]
-        CATALOG["Movie catalog"]
-        MODAL["Bilingual analysis modal"]
-        REPORT["Report, evidence popovers, follow-ups"]
-        CLIENT["Typed API client"]
-        CATALOG --> MODAL --> REPORT
-        CATALOG --> CLIENT
-        MODAL --> CLIENT
-        REPORT --> CLIENT
-    end
-
-    subgraph HTTP["FastAPI boundary"]
-        API["Thin routes and response models"]
-        MOVIES["movies.py<br/>filter and sort"]
-        POSTERS["posters.py<br/>IMDb lookup and fallback"]
-    end
-
-    subgraph CHAT["Evidence-only conversation runtime"]
-        SERVICE["MovieConversationService"]
-        POLICY["ConversationPolicy<br/>scope and five-question limit"]
-        CORE["MovieEvidencePromptCore<br/>all evidence for one movie_key"]
-        LLM["langchain-openai ChatOpenAI<br/>temperature 0"]
-        GROUNDING["grounding.py<br/>refs and answer segments"]
-        STORE[("TTL conversation store")]
-    end
-
-    subgraph DATA["Local and external sources"]
-        CSV[("selected_movies.csv")]
-        CHROMA[("langchain-chroma<br/>persistent divergence_evidence")]
-        IMDB["IMDb poster endpoints"]
-    end
-
-    CLIENT --> API
-    API --> MOVIES --> CSV
-    API --> POSTERS --> IMDB
-    API --> SERVICE
-    SERVICE --> POLICY
-    SERVICE --> CORE --> CHROMA
-    SERVICE --> LLM
-    SERVICE --> GROUNDING
-    SERVICE <--> STORE
-    GROUNDING --> API
-```
-
-The runtime does not embed the user's question or perform similarity search.
-`MovieEvidencePromptCore` loads every notebook-selected Chroma document for the
-chosen `movie_key`. `langchain-chroma` opens the persistent collection without
-an embedding function, while `langchain-openai` invokes the chat model.
-Citation cleanup and Popover-ready answer segments are deterministic Python
-functions.
-
-<details>
-<summary><strong>Component responsibilities</strong></summary>
-
-- `MovieEvidencePromptCore` loads every stored evidence document for the
-  selected movie and builds the grounded prompt.
-- `MovieConversationService` coordinates language-specific reports and
-  follow-up turns while preserving the raw LLM message history.
-- `ConversationPolicy` validates evidence focus and limits each report to five
-  follow-ups.
-- `grounding.py` creates the compact evidence references and converts valid
-  `[P/E]` markers into visible text segments plus Popover citations.
-- `InMemoryConversationStore` owns expiring server-side sessions and can later
-  be replaced with Redis.
-- `movies.py` and `posters.py` serve the catalog and IMDb artwork without
-  entering the conversation runtime.
-- The frontend consumes typed response segments directly. It does not parse
-  Markdown or reconstruct report structure.
-
-</details>
+| Discover | Ground | Explain | Explore |
+| --- | --- | --- | --- |
+| Choose a movie with a notable rating gap. | Use the fixed cross-platform review evidence selected for that movie. | Generate a readable report that separates strong disagreement from weak evidence. | Inspect original reviews and continue with bounded follow-up questions. |
 
 ## Run Locally
 
@@ -150,10 +62,8 @@ functions.
    cd frontend && npm install && cd ..
    ```
 
-3. Place `selected_movies.csv` at the repository root and the local Chroma
-   files under `divergence_evidence_artifacts/chroma/`. The manifest and core
-   also preserve compatibility with the notebook's original directory name.
-   Private data files stay ignored.
+3. Add the local movie catalog and evidence index. These private data files stay
+   ignored by Git.
 
 4. Start the API and frontend in separate terminals:
 
@@ -168,33 +78,5 @@ functions.
 
 Open [http://127.0.0.1:5173](http://127.0.0.1:5173).
 
-Check frontend types with `cd frontend && npm run typecheck`. A production
-build runs the same check automatically through `npm run build`.
-
-## API Surface
-
-| Method | Endpoint | Purpose |
-| --- | --- | --- |
-| `GET` | `/movies` | Browse and search the local movie catalog. |
-| `GET` | `/movie/{imdb_id}/poster` | Resolve a movie poster from IMDb. |
-| `POST` | `/movie/{movie_key}/analysis` | Create a grounded analysis session. |
-| `POST` | `/analysis/{session_id}/messages` | Ask a bounded follow-up question. |
-| `DELETE` | `/analysis/{session_id}` | Remove an active analysis session. |
-
-`GET /movies` accepts `gap_desc`, `gap_asc`, `votes_desc`, or `year_desc` as
-its `sort` value. Analysis responses expose only the session controls, counts,
-suggested questions, answer segments, and Popover evidence references.
-Follow-up responses contain only the submitted question, remaining count, and
-new answer segments.
-
-Follow-up questions are limited to 200 characters and may focus on up to four
-evidence references from the current report.
-
-## Data Boundary
-
-Credentials, local movie data, generated evidence indexes, dependency
-directories, and build outputs are intentionally excluded from Git. The
-committed manifest defines the Chroma collection contract used by the runtime.
-
-See [`Structure.txt`](Structure.txt) for the current file tree and module
-ownership.
+Credentials, private movie data, generated evidence indexes, tests, notebooks,
+dependencies, and build outputs are intentionally excluded from the repository.
