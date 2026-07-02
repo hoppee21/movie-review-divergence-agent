@@ -8,34 +8,45 @@ from uuid import uuid4
 from weakref import WeakValueDictionary
 
 from app.agent import MovieEvidencePromptCore
+from app.chat.grounding import (
+    build_evidence_refs,
+    movie_title,
+    prompt_messages,
+    split_internal_refs,
+)
 from app.chat.models import (
     AnalysisLanguage,
+    AnswerSegment,
+    ChatMessage,
     ConversationRecord,
-    ConversationTurn,
-    MovieChatReply,
+    EvidenceReference,
 )
+from app.chat.openai_client import ChatClient
 from app.chat.policy import ConversationPolicy
-from app.chat.session import ChatClient, MovieChatSession
 from app.chat.store import ConversationStore, InMemoryConversationStore
 
 
 CoreFactory = Callable[[AnalysisLanguage], MovieEvidencePromptCore]
-ClientFactory = Callable[[str | None, float], ChatClient]
+ClientFactory = Callable[[], ChatClient]
 
 
 @dataclass(frozen=True)
 class CreatedAnalysis:
     session_id: str
-    reply: MovieChatReply
+    language: AnalysisLanguage
+    evidence_count: int
+    pair_count: int
     remaining_questions: int
     suggested_questions: list[str]
+    segments: list[AnswerSegment]
+    evidence_refs: list[EvidenceReference]
 
 
 @dataclass(frozen=True)
 class CreatedFollowUp:
-    session_id: str
-    turn: ConversationTurn
+    question: str
     remaining_questions: int
+    segments: list[AnswerSegment]
 
 
 class MovieConversationService:
@@ -64,35 +75,42 @@ class MovieConversationService:
         movie_key: str,
         language: AnalysisLanguage,
         question: str,
-        model: str | None = None,
-        temperature: float = 0.0,
     ) -> CreatedAnalysis:
-        session = MovieChatSession.from_movie_key(
-            self._core_factory(language),
+        prompt = self._core_factory(language).build_movie_prompt(
             movie_key,
             question=question,
         )
-        if session.evidence_count == 0:
+        if not prompt.evidence:
             raise LookupError("No evidence found for movie.")
 
-        reply = session.initial_answer(self._client_factory(model, temperature))
+        evidence_refs = build_evidence_refs(prompt.evidence)
+        history = prompt_messages(prompt)
+        assistant_message = self._client_factory().complete(history)
+        history.append(assistant_message)
         now = datetime.now(UTC)
         record = ConversationRecord(
             session_id=uuid4().hex,
             language=language,
-            chat_state=session.state(),
-            model=model,
-            temperature=temperature,
+            movie_key=movie_key,
+            movie_title=movie_title(prompt.evidence),
+            evidence_refs=evidence_refs,
+            history=history,
             remaining_questions=self.policy.max_follow_ups,
-            created_at=now,
             expires_at=now + self._session_ttl,
         )
         self.store.save(record)
         return CreatedAnalysis(
             session_id=record.session_id,
-            reply=reply,
+            language=language,
+            evidence_count=len(prompt.evidence),
+            pair_count=prompt.pair_count,
             remaining_questions=record.remaining_questions,
             suggested_questions=self.policy.suggested_questions(language),
+            segments=split_internal_refs(
+                assistant_message.content,
+                allowed_refs={ref.citation for ref in evidence_refs},
+            ),
+            evidence_refs=evidence_refs,
         )
 
     def ask(
@@ -109,33 +127,25 @@ class MovieConversationService:
                 question=question,
                 focus_refs=focus_refs or [],
             )
-            session = MovieChatSession.from_state(record.chat_state)
             prompt = self.policy.render_follow_up_prompt(
                 language=record.language,
                 question=validated.question,
                 focus_refs=validated.focus_refs,
             )
-            reply = session.ask(
-                prompt,
-                self._client_factory(record.model, record.temperature),
+            record.history.append(
+                ChatMessage(role="user", content=prompt)
             )
-            turn = ConversationTurn(
-                question=validated.question,
-                focus_refs=validated.focus_refs,
-                answer=reply.assistant_message.content,
-                raw_answer=reply.raw_assistant_message.content
-                if reply.raw_assistant_message
-                else "",
-                segments=reply.segments,
-            )
-            record.chat_state = session.state()
-            record.turns.append(turn)
+            assistant_message = self._client_factory().complete(record.history)
+            record.history.append(assistant_message)
             record.remaining_questions -= 1
             self.store.save(record)
             return CreatedFollowUp(
-                session_id=session_id,
-                turn=turn,
+                question=validated.question,
                 remaining_questions=record.remaining_questions,
+                segments=split_internal_refs(
+                    assistant_message.content,
+                    allowed_refs={ref.citation for ref in record.evidence_refs},
+                ),
             )
 
     def delete(self, session_id: str) -> None:

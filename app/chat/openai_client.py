@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Protocol, Sequence
 
 from app.chat.models import ChatMessage
 
 
 DEFAULT_CONFIG_PATH = Path("config/openai.yml")
+
+
+class ChatClient(Protocol):
+    def complete(self, messages: Sequence[ChatMessage]) -> ChatMessage:
+        """Return one assistant message for the provided history."""
 
 
 class LangChainOpenAIChatClient:
@@ -18,18 +23,16 @@ class LangChainOpenAIChatClient:
         *,
         api_key: str,
         model: str,
-        temperature: float = 0.0,
     ) -> None:
         try:
             from langchain_openai import ChatOpenAI
         except ImportError as exc:
             raise RuntimeError("Install `langchain-openai` to use OpenAI chat.") from exc
 
-        self.model = model
         self._llm = ChatOpenAI(
             model=model,
             api_key=api_key,
-            temperature=temperature,
+            temperature=0.0,
         )
 
     @classmethod
@@ -37,21 +40,15 @@ class LangChainOpenAIChatClient:
         cls,
         *,
         config_path: str | Path = DEFAULT_CONFIG_PATH,
-        model: str | None = None,
-        temperature: float = 0.0,
     ) -> "LangChainOpenAIChatClient":
         settings = load_openai_settings(config_path)
         api_key = settings.get("api_key")
-        resolved_model = model or settings.get("model")
+        model = settings.get("model")
         if not api_key:
             raise RuntimeError("OpenAI API key is not set.")
-        if not resolved_model:
+        if not model:
             raise RuntimeError("OpenAI model is not set.")
-        return cls(
-            api_key=api_key,
-            model=resolved_model,
-            temperature=temperature,
-        )
+        return cls(api_key=api_key, model=model)
 
     def complete(self, messages: Sequence[ChatMessage]) -> ChatMessage:
         response = self._llm.invoke([_to_langchain_message(message) for message in messages])
@@ -93,10 +90,7 @@ def _clean_string(value: Any) -> str | None:
 
 
 def _to_langchain_message(message: ChatMessage) -> Any:
-    try:
-        from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-    except ImportError:
-        return {"role": message.role, "content": message.content}
+    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
     if message.role == "system":
         return SystemMessage(content=message.content)

@@ -21,7 +21,6 @@ class AgentCoreConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
-    manifest_path: Path | None = None
     persist_directory: Path | None = None
     collection_name: str = DEFAULT_COLLECTION_NAME
     language: Literal["zh", "en"] = "zh"
@@ -55,9 +54,8 @@ class MovieEvidencePrompt(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     movie_key: str
-    question: str
-    prompt: str
-    messages: list[Any]
+    system_prompt: str
+    user_prompt: str
     evidence: list[EvidenceDocument]
     pair_count: int
 
@@ -79,7 +77,6 @@ def config_from_manifest(
     manifest_path = Path(path)
     manifest = load_chroma_manifest(manifest_path)
     data = {
-        "manifest_path": manifest_path,
         "persist_directory": _resolve_persist_directory(
             manifest_path,
             manifest.get("persist_directory"),
@@ -106,12 +103,9 @@ class MovieEvidencePromptCore:
         config: AgentCoreConfig | None = None,
         *,
         vectorstore: Any | None = None,
-        load_vectorstore: bool = False,
     ) -> None:
         self.config = config or AgentCoreConfig()
         self._vectorstore = vectorstore
-        if load_vectorstore and self._vectorstore is None:
-            self._vectorstore = self._build_vectorstore()
 
     @classmethod
     def from_manifest(
@@ -143,13 +137,10 @@ class MovieEvidencePromptCore:
         question: str = DEFAULT_QUESTION,
     ) -> MovieEvidencePrompt:
         evidence = self.extract_movie_evidence(movie_key)
-        prompt = self._render_prompt(movie_key, question, evidence)
-        messages = self._messages(prompt)
         return MovieEvidencePrompt(
             movie_key=movie_key,
-            question=question,
-            prompt=prompt,
-            messages=messages,
+            system_prompt=self._system_prompt(),
+            user_prompt=self._render_user_prompt(movie_key, question, evidence),
             evidence=evidence,
             pair_count=len({item.pair_id for item in evidence if item.pair_id}),
         )
@@ -172,14 +163,12 @@ class MovieEvidencePromptCore:
         )
 
     def _get_chroma_rows(self, *, where: dict[str, Any]) -> dict[str, Any]:
-        vectorstore = self.vectorstore
-        include = ["documents", "metadatas"]
-        if hasattr(vectorstore, "get"):
-            return vectorstore.get(where=where, include=include)
-        collection = getattr(vectorstore, "_collection", None)
-        if collection is not None and hasattr(collection, "get"):
-            return collection.get(where=where, include=include)
-        raise TypeError("vectorstore must expose get(where=..., include=...)")
+        if not hasattr(self.vectorstore, "get"):
+            raise TypeError("vectorstore must expose get(where=..., include=...)")
+        return self.vectorstore.get(
+            where=where,
+            include=["documents", "metadatas"],
+        )
 
     def _rows_to_evidence(self, rows: dict[str, Any]) -> list[EvidenceDocument]:
         ids = rows.get("ids") or []
@@ -203,17 +192,6 @@ class MovieEvidencePromptCore:
             )
         return evidence
 
-    def _messages(self, prompt: str) -> list[Any]:
-        system_prompt = self._system_prompt()
-        try:
-            from langchain_core.messages import HumanMessage, SystemMessage
-        except ImportError:
-            return [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": prompt},
-            ]
-        return [SystemMessage(content=system_prompt), HumanMessage(content=prompt)]
-
     def _system_prompt(self) -> str:
         output_language = "Chinese" if self.config.language == "zh" else "English"
         return "\n".join(
@@ -223,6 +201,7 @@ class MovieEvidencePromptCore:
                 "The evidence documents are full review comments selected offline from IMDb and Douban.",
                 "Do not invent cultural causes or cite reviews not included in the prompt.",
                 "Write in a polished analytical tone suitable for a public product.",
+                "Write plain-text paragraphs without Markdown formatting, headings, or lists.",
                 "Avoid slang, overly casual phrasing, and database-style enumeration.",
                 "Add compact internal refs such as [P1/E1] after evidence-backed claims.",
                 "Use exact ASCII ref syntax with no spaces inside brackets, for example [P1/E1] or [P1/E1,E2].",
@@ -232,7 +211,7 @@ class MovieEvidencePromptCore:
             ]
         )
 
-    def _render_prompt(
+    def _render_user_prompt(
         self,
         movie_key: str,
         question: str,
@@ -253,14 +232,14 @@ class MovieEvidencePromptCore:
             "",
             "Answer style:",
             "1. Start with a concise thesis about the disagreement.",
-            "2. Then give 3 short analytical paragraphs. Do not use Markdown bullet lists.",
+            "2. Then give 3 short analytical paragraphs.",
             "3. Distinguish strong viewpoint disagreement from cases where the rating gap is stronger than the actual argument gap.",
             "4. Keep the tone measured, professional, and evidence-based.",
             "5. Add compact refs like [P1/E1] or [P1/E1,E2] after concrete evidence-backed claims.",
             "6. Use exact ASCII ref syntax with no spaces inside brackets, and only use refs from the evidence list.",
             "7. Never invent refs and never output raw source_evidence_id values.",
             "8. Do not use outside knowledge.",
-            "9. Avoid list markers such as '-', '*', or numbered outlines; the UI will handle visual structure.",
+            "9. Return plain text only. Do not use Markdown, headings, lists, or emphasis markers.",
             "",
             f"Evidence count: {len(evidence)}",
             f"Pair count: {len({item.pair_id for item in evidence if item.pair_id})}",

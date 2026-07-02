@@ -65,7 +65,7 @@ class ConversationPolicy:
                 code="too_many_focus_refs",
             )
 
-        allowed_refs = {ref.citation for ref in record.chat_state.evidence_refs}
+        allowed_refs = {ref.citation for ref in record.evidence_refs}
         invalid_refs = [ref for ref in unique_refs if ref not in allowed_refs]
         if invalid_refs:
             raise ConversationPolicyError(

@@ -54,7 +54,7 @@ an inspectable path back to the original reviews.
 - **Independent bilingual sessions:** switch between Chinese and English
   reports without mixing their conversation history.
 
-## Under the Hood
+## How the Evidence Stays Grounded
 
 The runtime is intentionally narrow. Selecting a movie fixes the evidence set;
 the service then manages the grounded report and its limited follow-up
@@ -68,7 +68,7 @@ flowchart LR
     CHAT --> CORE["Evidence prompt core"]
     CORE --> CHROMA[("Local Chroma index")]
     CHAT --> LLM["LangChain LLM client"]
-    LLM --> REPORT["Structured report + citations"]
+    LLM --> REPORT["Plain-text report + citation segments"]
     REPORT --> UI
 ```
 
@@ -108,8 +108,8 @@ and session store to be replaced independently.
    cd frontend && npm install && cd ..
    ```
 
-3. Provide the local movie catalog and Chroma evidence assets expected by the
-   API and committed manifest.
+3. Place `selected_movies.csv` and the local Chroma evidence directory where
+   the committed manifest expects them. These private data files stay ignored.
 
 4. Start the API and frontend in separate terminals:
 
@@ -124,7 +124,8 @@ and session store to be replaced independently.
 
 Open [http://127.0.0.1:5173](http://127.0.0.1:5173).
 
-Create a production frontend build with `cd frontend && npm run build`.
+Check frontend types with `cd frontend && npm run typecheck`. A production
+build runs the same check automatically through `npm run build`.
 
 ## API Surface
 
@@ -151,11 +152,15 @@ committed manifest defines the Chroma collection contract used by the runtime.
 ```text
 app/
 ├── agent/          # Chroma evidence extraction and prompt construction
-├── chat/           # LLM adapter, policy, sessions, service, and store
-└── api.py          # Movie, poster, analysis, and follow-up endpoints
+├── chat/           # Citation parsing, LLM adapter, policy, service, and store
+├── movies.py       # Movie catalog loading, filtering, and sorting
+├── posters.py      # IMDb poster lookup and HTML/JSON-LD fallback
+└── api.py          # Thin HTTP routes and response contracts
 frontend/
-└── src/            # React movie explorer and analysis workspace
-scripts/            # API, terminal chat, and prompt inspection entry points
+└── src/
+    ├── api.ts      # Typed frontend API client
+    └── components/ # Catalog visuals, analysis modal, report, and popovers
+scripts/            # API runner and prompt inspection entry point
 config/             # Safe local configuration template
 divergence_evidence_artifacts/
 └── chroma_divergence_evidence_manifest.json

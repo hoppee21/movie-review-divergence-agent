@@ -3,14 +3,13 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-from typing import Any
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.agent import DEFAULT_QUESTION, MovieEvidencePromptCore
+from app.agent import DEFAULT_QUESTION, MovieEvidencePromptCore  # noqa: E402
 
 
 DEFAULT_MANIFEST = "divergence_evidence_artifacts/chroma_divergence_evidence_manifest.json"
@@ -37,12 +36,6 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def content_as_text(message: Any) -> str:
-    if isinstance(message, dict):
-        return str(message.get("content", ""))
-    return str(getattr(message, "content", ""))
-
-
 def main() -> None:
     args = parse_args()
     core = MovieEvidencePromptCore.from_manifest(args.manifest)
@@ -52,10 +45,12 @@ def main() -> None:
     print(f"Evidence documents: {len(payload.evidence)}")
     print(f"Evidence pairs: {payload.pair_count}")
     print()
-    for message in payload.messages:
-        print("=" * 80)
-        print(content_as_text(message))
-        print()
+    print("=" * 80)
+    print(payload.system_prompt)
+    print()
+    print("=" * 80)
+    print(payload.user_prompt)
+    print()
 
 
 if __name__ == "__main__":

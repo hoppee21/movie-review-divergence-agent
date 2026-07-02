@@ -20,15 +20,11 @@ class ChatMessage(BaseModel):
 
 
 class EvidenceReference(BaseModel):
-    """Frontend citation map from display labels to source evidence metadata."""
+    """Public citation target used by the evidence popover."""
 
     model_config = ConfigDict(extra="forbid")
 
-    evidence_label: str
-    pair_label: str
     citation: str
-    evidence_id: str
-    pair_id: str
     platform: str
     rating: float | None = None
     text: str
@@ -43,44 +39,6 @@ class AnswerSegment(BaseModel):
     citations: list[str] = Field(default_factory=list)
 
 
-class MovieChatState(BaseModel):
-    """Serializable state for one movie-grounded chat session."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    movie_key: str
-    movie_title: str = "unknown"
-    evidence_count: int
-    pair_count: int
-    evidence_ids: list[str] = Field(default_factory=list)
-    evidence_refs: list[EvidenceReference] = Field(default_factory=list)
-    history: list[ChatMessage] = Field(default_factory=list)
-
-
-class MovieChatReply(BaseModel):
-    """Return payload for an initial answer or one follow-up turn."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    state: MovieChatState
-    assistant_message: ChatMessage
-    raw_assistant_message: ChatMessage | None = None
-    segments: list[AnswerSegment] = Field(default_factory=list)
-    user_message: ChatMessage | None = None
-
-
-class ConversationTurn(BaseModel):
-    """One public follow-up turn inside a bounded evidence conversation."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    question: str
-    focus_refs: list[str] = Field(default_factory=list)
-    answer: str
-    raw_answer: str
-    segments: list[AnswerSegment] = Field(default_factory=list)
-
-
 class ConversationRecord(BaseModel):
     """Server-side record for one language-specific movie analysis session."""
 
@@ -88,10 +46,9 @@ class ConversationRecord(BaseModel):
 
     session_id: str
     language: AnalysisLanguage
-    chat_state: MovieChatState
-    model: str | None = None
-    temperature: float = 0.0
+    movie_key: str
+    movie_title: str
+    evidence_refs: list[EvidenceReference] = Field(default_factory=list)
+    history: list[ChatMessage] = Field(default_factory=list)
     remaining_questions: int
-    turns: list[ConversationTurn] = Field(default_factory=list)
-    created_at: datetime
     expires_at: datetime
