@@ -1,24 +1,24 @@
 movie-review-divergence-agent/
 ├── app/
 │   ├── agent/
-│   │   └── core.py                  # selected movie -> all Chroma evidence -> prompt
+│   │   └── core.py                  # one movie_key -> all Chroma evidence -> prompt
 │   ├── chat/
-│   │   ├── grounding.py             # evidence refs and citation-to-segment parsing
-│   │   ├── models.py                # compact public models and conversation records
-│   │   ├── openai_client.py         # LangChain/OpenAI adapter
+│   │   ├── grounding.py             # evidence refs, LLM messages, and answer segments
+│   │   ├── models.py                # slim API models and server conversation records
+│   │   ├── openai_client.py         # LangChain ChatOpenAI adapter
 │   │   ├── policy.py                # follow-up limits and evidence focus validation
 │   │   ├── service.py               # bounded conversation application service
-│   │   └── store.py                 # replaceable conversation store
+│   │   └── store.py                 # expiring, replaceable conversation store
 │   ├── api.py                       # thin HTTP routes and response contracts
 │   ├── movies.py                    # movie catalog loading, filtering, and sorting
-│   └── posters.py                   # IMDb poster lookup and fallback parsing
+│   └── posters.py                   # IMDb suggestion and HTML/JSON-LD poster fallback
 ├── frontend/
 │   └── src/
 │       ├── components/
 │       │   ├── AnalysisReport.tsx   # report segments, popovers, and follow-ups
-│       │   ├── MovieDetailModal.tsx # bilingual analysis workspace
+│       │   ├── MovieDetailModal.tsx # bilingual sessions and analysis workspace
 │       │   └── MovieVisuals.tsx     # posters, ratings, and movie cards
-│       ├── api.ts                   # typed API client and public contracts
+│       ├── api.ts                   # typed HTTP client and frontend contracts
 │       ├── App.tsx                  # searchable, sortable movie catalog
 │       ├── index.css
 │       └── main.tsx

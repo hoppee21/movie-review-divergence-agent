@@ -58,22 +58,60 @@ an inspectable path back to the original reviews.
 
 The runtime is intentionally narrow. Selecting a movie fixes the evidence set;
 the service then manages the grounded report and its limited follow-up
-conversation.
+conversation. Catalog browsing and poster loading stay outside the LLM path.
 
 ```mermaid
-flowchart LR
-    USER["Select a movie"] --> UI["React analysis workspace"]
-    UI --> API["FastAPI"]
-    API --> CHAT["Conversation service"]
-    CHAT --> CORE["Evidence prompt core"]
-    CORE --> CHROMA[("Local Chroma index")]
-    CHAT --> LLM["LangChain LLM client"]
-    LLM --> REPORT["Plain-text report + citation segments"]
-    REPORT --> UI
+flowchart TB
+    subgraph FRONTEND["React frontend"]
+        CATALOG["Movie catalog"]
+        MODAL["Bilingual analysis modal"]
+        REPORT["Report, evidence popovers, follow-ups"]
+        CLIENT["Typed API client"]
+        CATALOG --> MODAL --> REPORT
+        CATALOG --> CLIENT
+        MODAL --> CLIENT
+        REPORT --> CLIENT
+    end
+
+    subgraph HTTP["FastAPI boundary"]
+        API["Thin routes and response models"]
+        MOVIES["movies.py<br/>filter and sort"]
+        POSTERS["posters.py<br/>IMDb lookup and fallback"]
+    end
+
+    subgraph CHAT["Evidence-only conversation runtime"]
+        SERVICE["MovieConversationService"]
+        POLICY["ConversationPolicy<br/>scope and five-question limit"]
+        CORE["MovieEvidencePromptCore<br/>all evidence for one movie_key"]
+        LLM["langchain-openai ChatOpenAI<br/>temperature 0"]
+        GROUNDING["grounding.py<br/>refs and answer segments"]
+        STORE[("TTL conversation store")]
+    end
+
+    subgraph DATA["Local and external sources"]
+        CSV[("selected_movies.csv")]
+        CHROMA[("langchain-chroma<br/>persistent divergence_evidence")]
+        IMDB["IMDb poster endpoints"]
+    end
+
+    CLIENT --> API
+    API --> MOVIES --> CSV
+    API --> POSTERS --> IMDB
+    API --> SERVICE
+    SERVICE --> POLICY
+    SERVICE --> CORE --> CHROMA
+    SERVICE --> LLM
+    SERVICE --> GROUNDING
+    SERVICE <--> STORE
+    GROUNDING --> API
 ```
 
-This separation keeps evidence retrieval deterministic while allowing the LLM
-and session store to be replaced independently.
+The runtime does not embed the user's question or perform similarity search.
+`MovieEvidencePromptCore` loads every notebook-selected Chroma document for the
+chosen `movie_key`. `langchain-chroma` opens the persistent collection without
+an embedding function, while `langchain-openai` invokes the chat model.
+Citation cleanup and Popover-ready answer segments are deterministic Python
+functions.
 
 <details>
 <summary><strong>Component responsibilities</strong></summary>
@@ -81,13 +119,17 @@ and session store to be replaced independently.
 - `MovieEvidencePromptCore` loads every stored evidence document for the
   selected movie and builds the grounded prompt.
 - `MovieConversationService` coordinates language-specific reports and
-  follow-up turns.
+  follow-up turns while preserving the raw LLM message history.
 - `ConversationPolicy` validates evidence focus and limits each report to five
   follow-ups.
+- `grounding.py` creates the compact evidence references and converts valid
+  `[P/E]` markers into visible text segments plus Popover citations.
 - `InMemoryConversationStore` owns expiring server-side sessions and can later
   be replaced with Redis.
-- The frontend renders structured answer segments and evidence popovers instead
-  of parsing raw citation labels.
+- `movies.py` and `posters.py` serve the catalog and IMDb artwork without
+  entering the conversation runtime.
+- The frontend consumes typed response segments directly. It does not parse
+  Markdown or reconstruct report structure.
 
 </details>
 
@@ -108,8 +150,10 @@ and session store to be replaced independently.
    cd frontend && npm install && cd ..
    ```
 
-3. Place `selected_movies.csv` and the local Chroma evidence directory where
-   the committed manifest expects them. These private data files stay ignored.
+3. Place `selected_movies.csv` at the repository root and the local Chroma
+   files under `divergence_evidence_artifacts/chroma/`. The manifest and core
+   also preserve compatibility with the notebook's original directory name.
+   Private data files stay ignored.
 
 4. Start the API and frontend in separate terminals:
 
@@ -137,6 +181,12 @@ build runs the same check automatically through `npm run build`.
 | `POST` | `/analysis/{session_id}/messages` | Ask a bounded follow-up question. |
 | `DELETE` | `/analysis/{session_id}` | Remove an active analysis session. |
 
+`GET /movies` accepts `gap_desc`, `gap_asc`, `votes_desc`, or `year_desc` as
+its `sort` value. Analysis responses expose only the session controls, counts,
+suggested questions, answer segments, and Popover evidence references.
+Follow-up responses contain only the submitted question, remaining count, and
+new answer segments.
+
 Follow-up questions are limited to 200 characters and may focus on up to four
 evidence references from the current report.
 
@@ -146,24 +196,5 @@ Credentials, local movie data, generated evidence indexes, dependency
 directories, and build outputs are intentionally excluded from Git. The
 committed manifest defines the Chroma collection contract used by the runtime.
 
-<details>
-<summary><strong>Project layout</strong></summary>
-
-```text
-app/
-├── agent/          # Chroma evidence extraction and prompt construction
-├── chat/           # Citation parsing, LLM adapter, policy, service, and store
-├── movies.py       # Movie catalog loading, filtering, and sorting
-├── posters.py      # IMDb poster lookup and HTML/JSON-LD fallback
-└── api.py          # Thin HTTP routes and response contracts
-frontend/
-└── src/
-    ├── api.ts      # Typed frontend API client
-    └── components/ # Catalog visuals, analysis modal, report, and popovers
-scripts/            # API runner and prompt inspection entry point
-config/             # Safe local configuration template
-divergence_evidence_artifacts/
-└── chroma_divergence_evidence_manifest.json
-```
-
-</details>
+See [`Structure.txt`](Structure.txt) for the current file tree and module
+ownership.
