@@ -26,7 +26,7 @@ Movie Review Divergence Agent turns that gap into an evidence-grounded
 explanation. Select a movie, generate a Chinese or English report, inspect the
 reviews behind its claims, and ask focused follow-up questions.
 
-> The runtime does not search for convenient reviews or invent cultural causes.
+> The analysis does not search for convenient reviews or invent cultural causes.
 > It explains only what the fixed evidence set can support.
 
 ## What You Can Do
@@ -73,10 +73,6 @@ reviews behind its claims, and ask focused follow-up questions.
 
    ```bash
    cd frontend
-   npm run dev -- --host 127.0.0.1
+   npm run dev
    ```
 
-Open [http://127.0.0.1:5173](http://127.0.0.1:5173).
-
-Credentials, private movie data, generated evidence indexes, tests, notebooks,
-dependencies, and build outputs are intentionally excluded from the repository.
