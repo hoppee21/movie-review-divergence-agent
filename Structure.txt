@@ -28,10 +28,12 @@ movie-review-divergence-agent/
 ├── config/
 │   └── openai.example.yml
 ├── divergence_evidence_artifacts/
-│   └── chroma_divergence_evidence_manifest.json
+│   └── chroma_divergence_evidence_manifest.json # local artifact, ignored by Git
 ├── docs/
+│   ├── architecture.md              # internal architecture diagram and speaking notes
 │   └── assets/
 │       ├── evidence-analysis.png
 │       └── movie-explorer.png
+├── package.json                     # root npm commands delegated to frontend
 ├── README.md
 └── requirements.txt

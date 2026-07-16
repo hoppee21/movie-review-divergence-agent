@@ -47,6 +47,14 @@ class EvidenceDocument(BaseModel):
     def divergence_score(self) -> float:
         return _as_float(self.metadata.get("divergence_score"))
 
+    @property
+    def evidence_role(self) -> str:
+        return str(self.metadata.get("evidence_role") or "").strip().lower()
+
+    @property
+    def relation_type(self) -> str:
+        return str(self.metadata.get("relation_type") or "").strip().lower()
+
 
 class MovieEvidencePrompt(BaseModel):
     """Prompt payload for one selected movie."""
@@ -139,7 +147,7 @@ class MovieEvidencePromptCore:
         evidence = self.extract_movie_evidence(movie_key)
         return MovieEvidencePrompt(
             movie_key=movie_key,
-            system_prompt=self._system_prompt(),
+            system_prompt=self._system_prompt(evidence),
             user_prompt=self._render_user_prompt(movie_key, question, evidence),
             evidence=evidence,
             pair_count=len({item.pair_id for item in evidence if item.pair_id}),
@@ -192,24 +200,36 @@ class MovieEvidencePromptCore:
             )
         return evidence
 
-    def _system_prompt(self) -> str:
+    def _system_prompt(self, evidence: list[EvidenceDocument]) -> str:
         output_language = "Chinese" if self.config.language == "zh" else "English"
-        return "\n".join(
-            [
-                "You are a professional movie review evidence analyst.",
-                "Use only the provided evidence documents.",
-                "The evidence documents are full review comments selected offline from IMDb and Douban.",
-                "Do not invent cultural causes or cite reviews not included in the prompt.",
-                "Write in a polished analytical tone suitable for a public product.",
-                "Write plain-text paragraphs without Markdown formatting, headings, or lists.",
-                "Avoid slang, overly casual phrasing, and database-style enumeration.",
-                "Add compact internal refs such as [P1/E1] after evidence-backed claims.",
-                "Use exact ASCII ref syntax with no spaces inside brackets, for example [P1/E1] or [P1/E1,E2].",
-                "The application will hide those refs from users or convert them into evidence popovers.",
-                "Do not expose raw source_evidence_id values unless the user asks for audit details.",
-                f"Answer in {output_language}.",
-            ]
-        )
+        lines = [
+            "You are a professional movie review evidence analyst.",
+            "Use only the provided evidence documents.",
+            "The evidence documents are full review comments selected offline from IMDb and Douban.",
+            "Interpret evidence_role and relation_type as binding evidence boundaries.",
+            "primary_disagreement may support a disagreement claim; counterevidence weakens or qualifies it.",
+            "coverage_fallback only guarantees that cross-platform comments are available and does not prove disagreement.",
+            "strong_opposition means supported opposite evaluations; severity_gap may mean the rating gap is stronger than the argument gap.",
+            "shared_view indicates agreement or overlap; unclear does not support a concrete disagreement claim.",
+            "Do not invent cultural causes or cite reviews not included in the prompt.",
+            "Write in a polished analytical tone suitable for a public product.",
+            "Write plain-text paragraphs without Markdown formatting, headings, or lists.",
+            "Avoid slang, overly casual phrasing, and database-style enumeration.",
+            "Add compact internal refs such as [P1/E1] after evidence-backed claims.",
+            "Use exact ASCII ref syntax with no spaces inside brackets, for example [P1/E1] or [P1/E1,E2].",
+            "The application will hide those refs from users or convert them into evidence popovers.",
+            "Do not expose raw source_evidence_id values unless the user asks for audit details.",
+        ]
+        if _is_fallback_only(evidence):
+            lines.extend(
+                [
+                    "The current movie has only coverage_fallback evidence.",
+                    "You must state that the available evidence is insufficient to establish a reliable IMDb-Douban disagreement.",
+                    "You may summarize overlap or uncertainty, but must not turn a rating difference into a viewpoint disagreement.",
+                ]
+            )
+        lines.append(f"Answer in {output_language}.")
+        return "\n".join(lines)
 
     def _render_user_prompt(
         self,
@@ -220,10 +240,12 @@ class MovieEvidencePromptCore:
         movie_title = _first_nonempty(
             item.metadata.get("movie_title") for item in evidence
         )
+        evidence_status = _evidence_status(evidence)
         lines = [
             f"Movie key: {movie_key}",
             f"Movie title: {movie_title or 'unknown'}",
             f"Question: {question}",
+            f"Evidence status: {evidence_status}",
             "",
             "Audience:",
             "- The answer is for a public-facing movie review product.",
@@ -231,21 +253,44 @@ class MovieEvidencePromptCore:
             "- The UI will convert compact refs such as [P1/E1] into evidence popovers.",
             "",
             "Answer style:",
-            "1. Start with a concise thesis about the disagreement.",
-            "2. Then give 3 short analytical paragraphs.",
-            "3. Distinguish strong viewpoint disagreement from cases where the rating gap is stronger than the actual argument gap.",
-            "4. Keep the tone measured, professional, and evidence-based.",
-            "5. Add compact refs like [P1/E1] or [P1/E1,E2] after concrete evidence-backed claims.",
-            "6. Use exact ASCII ref syntax with no spaces inside brackets, and only use refs from the evidence list.",
-            "7. Never invent refs and never output raw source_evidence_id values.",
-            "8. Do not use outside knowledge.",
-            "9. Return plain text only. Do not use Markdown, headings, lists, or emphasis markers.",
-            "",
-            f"Evidence count: {len(evidence)}",
-            f"Pair count: {len({item.pair_id for item in evidence if item.pair_id})}",
-            "",
-            "Evidence:",
         ]
+        if evidence_status == "insufficient_for_disagreement":
+            lines.extend(
+                [
+                    "1. Begin by saying that the available evidence is insufficient to establish a reliable platform disagreement.",
+                    "2. Briefly describe only supported overlap, uncertainty, or isolated observations.",
+                    "3. Do not present coverage_fallback, a rating gap, or an unclear relation as proof of viewpoint disagreement.",
+                    "4. Keep the tone measured, professional, and evidence-based.",
+                    "5. Add compact refs like [P1/E1] or [P1/E1,E2] after concrete evidence-backed claims.",
+                    "6. Use exact ASCII ref syntax with no spaces inside brackets, and only use refs from the evidence list.",
+                    "7. Never invent refs and never output raw source_evidence_id values.",
+                    "8. Do not use outside knowledge.",
+                    "9. Return plain text only. Do not use Markdown, headings, lists, or emphasis markers.",
+                ]
+            )
+        else:
+            lines.extend(
+                [
+                    "1. Start with a concise thesis about the disagreement.",
+                    "2. Then give 3 short analytical paragraphs.",
+                    "3. Distinguish strong viewpoint disagreement from cases where the rating gap is stronger than the actual argument gap.",
+                    "4. Keep the tone measured, professional, and evidence-based.",
+                    "5. Add compact refs like [P1/E1] or [P1/E1,E2] after concrete evidence-backed claims.",
+                    "6. Use exact ASCII ref syntax with no spaces inside brackets, and only use refs from the evidence list.",
+                    "7. Never invent refs and never output raw source_evidence_id values.",
+                    "8. Do not use outside knowledge.",
+                    "9. Return plain text only. Do not use Markdown, headings, lists, or emphasis markers.",
+                ]
+            )
+        lines.extend(
+            [
+                "",
+                f"Evidence count: {len(evidence)}",
+                f"Pair count: {len({item.pair_id for item in evidence if item.pair_id})}",
+                "",
+                "Evidence:",
+            ]
+        )
         if not evidence:
             lines.append("No evidence documents were found for this movie_key.")
             return "\n".join(lines)
@@ -263,8 +308,14 @@ class MovieEvidencePromptCore:
                     [
                         "",
                         f"Pair {pair_label}:",
+                        f"  evidence_role: {meta.get('evidence_role', 'legacy_unclassified')}",
+                        f"  relation_type: {meta.get('relation_type', 'legacy_unclassified')}",
+                        f"  imdb_stance: {meta.get('imdb_stance', '')}",
+                        f"  douban_stance: {meta.get('douban_stance', '')}",
                         f"  topic_similarity: {meta.get('topic_similarity', '')}",
                         f"  rating_gap: {meta.get('rating_gap', '')}",
+                        f"  evidence_quality: {meta.get('evidence_quality', '')}",
+                        f"  selection_confidence: {meta.get('selection_confidence', '')}",
                         f"  divergence_score: {meta.get('divergence_score', '')}",
                     ]
                 )
@@ -273,6 +324,8 @@ class MovieEvidencePromptCore:
                     f"- internal_ref: {pair_label}/{evidence_label}",
                     f"  platform: {meta.get('platform', '')}",
                     f"  rating: {meta.get('rating', '')}",
+                    "  matched_excerpt:",
+                    _indent(str(meta.get("excerpt") or ""), "    "),
                     "  full_review:",
                     _indent(item.text, "    "),
                 ]
@@ -286,6 +339,8 @@ def _resolve_persist_directory(manifest_path: Path, raw_value: Any) -> Path | No
     path = Path(str(raw_value))
     if path.is_absolute():
         return path
+    if (manifest_path.parent / "chroma.sqlite3").exists():
+        return manifest_path.parent
     if manifest_path.parent.name == path.name:
         return manifest_path.parent
     candidate = manifest_path.parent / path
@@ -299,13 +354,39 @@ def _resolve_persist_directory(manifest_path: Path, raw_value: Any) -> Path | No
 
 def _evidence_sort_key(item: EvidenceDocument) -> tuple[Any, ...]:
     platform_order = {"imdb": 0, "douban": 1}
+    role_order = {
+        "primary_disagreement": 0,
+        "counterevidence": 1,
+        "coverage_fallback": 2,
+        "": 3,
+    }
     return (
-        -item.divergence_score,
+        role_order.get(item.evidence_role, 3),
         item.metadata.get("rank_within_movie", 10_000),
+        -item.divergence_score,
         item.pair_id,
         platform_order.get(item.platform, 99),
         item.evidence_id,
     )
+
+
+def _is_fallback_only(evidence: list[EvidenceDocument]) -> bool:
+    return bool(evidence) and all(
+        item.evidence_role == "coverage_fallback" for item in evidence
+    )
+
+
+def _evidence_status(evidence: list[EvidenceDocument]) -> str:
+    if not evidence:
+        return "no_evidence"
+    if _is_fallback_only(evidence):
+        return "insufficient_for_disagreement"
+    roles = {item.evidence_role for item in evidence if item.evidence_role}
+    if "primary_disagreement" in roles:
+        return "primary_disagreement_available"
+    if roles:
+        return "non_primary_evidence_only"
+    return "legacy_unclassified"
 
 
 def _as_float(value: Any) -> float:

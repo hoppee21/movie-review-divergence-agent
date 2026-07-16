@@ -59,5 +59,7 @@ reviews.jsonl
 *.sqlite3
 chroma_divergence_evidence*/
 divergence_evidence_artifacts/chroma/
+divergence_evidence_artifacts/*/
 divergence_evidence_artifacts/*.jsonl
+divergence_evidence_artifacts/*.json
 divergence_evidence_artifacts/*.csv

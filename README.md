@@ -72,7 +72,5 @@ reviews behind its claims, and ask focused follow-up questions.
    ```
 
    ```bash
-   cd frontend
    npm run dev
    ```
-
