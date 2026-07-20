@@ -12,6 +12,8 @@
 
 Explore rating gaps · Read grounded reports · Inspect the evidence · Ask focused follow-ups
 
+[**Open the Live 3D Evidence Projector →**](https://movie-review-projector.yihui293.chatgpt.site)
+
 </div>
 
 ![Movie explorer showing IMDb and Douban rating gaps](docs/assets/movie-explorer.png)
@@ -38,6 +40,13 @@ reviews behind its claims, and ask focused follow-up questions.
 - Distinguish real viewpoint conflict from differences in scoring severity.
 
 ![Evidence-grounded analysis and follow-up conversation](docs/assets/evidence-analysis.png)
+
+## Explore the Evidence Space
+
+Use the [live 3D evidence projector](https://movie-review-projector.yihui293.chatgpt.site)
+to explore one movie at a time. Solid points and connecting lines show the
+selected IMDb/Douban evidence pairs; smaller hollow points provide nearby
+semantic context and are not treated as evidence cited by the agent.
 
 ## Evidence Journey
 
